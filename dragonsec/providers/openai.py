@@ -62,7 +62,7 @@ class OpenAIProvider(AIProvider):
             
             content = response.choices[0].message.content.strip()
             
-            # Clean markdown code block markers
+            # clean markdown code block markers
             if content.startswith('```'):
                 content = content.split('\n', 1)[1]  # Remove first line
             if content.endswith('```'):
@@ -103,10 +103,10 @@ class OpenAIProvider(AIProvider):
         """Merge and enhance semgrep results with AI analysis"""
         ai_vulns = ai_results.get("vulnerabilities", [])
         
-        # Process semgrep results
+        # process semgrep results
         semgrep_vulns = []
         for finding in semgrep_results:
-            # Convert semgrep path to relative path
+            # convert semgrep path to relative path
             file_path = finding.get("path", "")
             relative_path = self._get_relative_project_path(file_path)
             
@@ -266,5 +266,3 @@ class OpenAIProvider(AIProvider):
                     break
         
         return max(0, min(100, score))
-
-    # ... 其他辅助方法的实现 ... 

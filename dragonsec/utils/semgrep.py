@@ -15,7 +15,7 @@ class SemgrepRunner:
         """Run semgrep scan with optimizations"""
         target_path = os.path.expanduser(target_path)
         
-        # 检查缓存
+        # check cache
         file_hash = self._get_file_hash(target_path)
         if file_hash in self.cache:
             return self.cache[file_hash]

@@ -49,7 +49,6 @@ class GeminiProvider(AIProvider):
             response = await self.model.generate_content_async(prompt)
             result = json.loads(response.text)
             
-            # 确保每个漏洞都有正确的相对路径
             for vuln in result.get("vulnerabilities", []):
                 if "file" not in vuln or not vuln["file"]:
                     vuln["file"] = relative_path
@@ -63,7 +62,7 @@ class GeminiProvider(AIProvider):
         """Merge and enhance semgrep results with AI analysis"""
         ai_vulns = ai_results.get("vulnerabilities", [])
         
-        # 处理 semgrep 结果
+        # process semgrep results
         semgrep_vulns = []
         for finding in semgrep_results:
             file_path = finding.get("path", "")
@@ -89,9 +88,9 @@ class GeminiProvider(AIProvider):
             "summary": f"Found {len(all_vulns)} vulnerabilities ({len(semgrep_vulns)} from semgrep, {len(ai_vulns)} from AI analysis). Security Score: {score}%"
         }
 
-    # 复用与 OpenAIProvider 相同的辅助方法
+    # reuse the same helper methods as OpenAIProvider
     def _optimize_context(self, file_path: str, context: Dict) -> str:
-        """优化上下文信息，减少 token 使用"""
+        """optimize context information, reduce token usage"""
         project_root = str(Path(file_path).parent)
         
         if project_root not in self.context_cache:
@@ -113,7 +112,7 @@ class GeminiProvider(AIProvider):
         """
 
     def _filter_relevant_deps(self, deps: Dict[str, str]) -> Dict[str, str]:
-        """过滤出安全相关的依赖"""
+        """filter out security related dependencies"""
         security_related = {
             'crypto', 'security', 'auth', 'jwt', 'bcrypt', 'hash',
             'password', 'ssl', 'tls', 'https', 'oauth'
@@ -124,7 +123,7 @@ class GeminiProvider(AIProvider):
         }
 
     def _simplify_structure(self, structure: Dict) -> Dict:
-        """简化项目结构，只保留关键目录"""
+        """simplify project structure, only keep key directories"""
         key_dirs = {'src', 'security', 'auth', 'api', 'controllers', 'routes'}
         return {
             k: v for k, v in structure.items() 
@@ -132,7 +131,7 @@ class GeminiProvider(AIProvider):
         }
 
     def _filter_related_files(self, current_file: str, related: List[str], max_files: int = 3) -> List[str]:
-        """选择最相关的文件"""
+        """select the most relevant files"""
         current_dir = str(Path(current_file).parent)
         security_patterns = {'security', 'auth', 'login', 'password', 'crypto'}
         
@@ -148,7 +147,7 @@ class GeminiProvider(AIProvider):
         return [f for _, f in sorted(scored_files, reverse=True)[:max_files]]
 
     def _filter_relevant_imports(self, imports: List[str], max_imports: int = 5) -> List[str]:
-        """过滤出最相关的导入"""
+        """filter out the most relevant imports"""
         security_related = {
             'crypto', 'security', 'auth', 'jwt', 'bcrypt',
             'hash', 'password', 'ssl', 'tls', 'https'
@@ -158,7 +157,7 @@ class GeminiProvider(AIProvider):
         return relevant[:max_imports]
 
     def _get_default_response(self) -> Dict:
-        """返回默认响应"""
+        """return default response"""
         return {
             "vulnerabilities": [],
             "overall_score": 0,
@@ -166,7 +165,7 @@ class GeminiProvider(AIProvider):
         }
 
     def _find_project_root(self, file_path: str) -> Optional[str]:
-        """查找项目根目录"""
+        """find the project root directory"""
         current = Path(file_path).parent
         root_indicators = {'.git', 'package.json', 'setup.py', 'pom.xml', 'build.gradle'}
         
@@ -177,7 +176,7 @@ class GeminiProvider(AIProvider):
         return None
 
     def _get_relative_project_path(self, file_path: str) -> str:
-        """获取相对于项目根目录的路径"""
+        """get the relative path from the project root"""
         try:
             file_path = Path(file_path)
             root_dir = self._find_project_root(str(file_path))
@@ -193,7 +192,7 @@ class GeminiProvider(AIProvider):
             return Path(file_path).name
 
     def _convert_semgrep_severity(self, severity: str) -> int:
-        """Convert semgrep severity to numeric scale"""
+        """convert semgrep severity to numeric scale"""
         severity_map = {
             "ERROR": 9,
             "WARNING": 6,
@@ -206,7 +205,7 @@ class GeminiProvider(AIProvider):
         return severity_map.get(severity, 5)
 
     def _calculate_security_score(self, vulnerabilities: List[Dict]) -> int:
-        """Calculate security score based on vulnerabilities"""
+        """calculate security score based on vulnerabilities"""
         if not vulnerabilities:
             return 100
         

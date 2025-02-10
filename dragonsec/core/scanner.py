@@ -76,7 +76,7 @@ class SecurityScanner:
                 pbar.update(1)
                 return result
         elif os.path.isdir(path):
-            # 获取要扫描的文件列表
+            # get all files to scan
             files_to_scan = []
             for root, _, files in os.walk(path):
                 for file in files:
@@ -88,12 +88,12 @@ class SecurityScanner:
             semgrep_count = 0
             ai_count = 0
             
-            # 创建进度条
+            # create progress bar
             with tqdm(total=total_files, desc=f"Scanning with {self.mode.value}") as pbar:
-                # 创建所有文件的扫描任务
+                # create all files scan tasks
                 tasks = [self.scan_file(file) for file in files_to_scan]
                 
-                # 并发执行所有任务
+                # execute all tasks concurrently
                 for coro in asyncio.as_completed(tasks):
                     try:
                         result = await coro
@@ -108,12 +108,12 @@ class SecurityScanner:
 
             elapsed_time = time.time() - start_time
             
-            # 计算总体安全评分
+            # calculate overall security score
             score = 100
             if self.ai_provider:
                 score = self.ai_provider._calculate_security_score(all_results)
             elif all_results:
-                score = 50  # 如果只有 semgrep 结果，给出中等分数
+                score = 50  # if only semgrep results, give a medium score
             
             return {
                 "vulnerabilities": all_results,
@@ -150,12 +150,12 @@ async def _async_main():
                        help="Directory to save scan results (default: dragonsec/scan_results)")
     args = parser.parse_args()
 
-    # Validate parameters
+    # validate parameters
     mode = ScanMode(args.mode)
     if mode != ScanMode.SEMGREP_ONLY and not args.api_key:
         parser.error(f"--api-key is required for {mode.value} mode")
 
-    # Load cache
+    # load cache
     cache = {}
     if args.cache and os.path.exists(args.cache):
         try:
