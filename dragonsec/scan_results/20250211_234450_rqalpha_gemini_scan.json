@@ -1,0 +1,33 @@
+{
+  "vulnerabilities": [
+    {
+      "source": "semgrep",
+      "type": "unknown",
+      "severity": 5,
+      "description": "",
+      "line_number": 0,
+      "file": "",
+      "risk_analysis": "Unknown impact",
+      "recommendation": "No fix provided"
+    },
+    {
+      "source": "semgrep",
+      "type": "unknown",
+      "severity": 5,
+      "description": "",
+      "line_number": 0,
+      "file": "",
+      "risk_analysis": "Unknown impact",
+      "recommendation": "No fix provided"
+    }
+  ],
+  "overall_score": 90,
+  "summary": "Found 2 vulnerabilities (2 from semgrep, 0 from AI analysis). Security Score: 90%. Scan completed in 115.56 seconds.",
+  "metadata": {
+    "scan_time": 115.56045317649841,
+    "timestamp": "2025-02-11 23:44:50",
+    "mode": "gemini",
+    "files_scanned": 138,
+    "files_with_issues": 1
+  }
+}

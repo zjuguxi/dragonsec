@@ -1,0 +1,12 @@
+{
+  "vulnerabilities": [],
+  "overall_score": 100,
+  "summary": "Found 0 vulnerabilities (0 from semgrep, 0 from AI analysis). Security Score: 100%. Scan completed in 22.42 seconds.",
+  "metadata": {
+    "scan_time": 22.419765949249268,
+    "timestamp": "2025-02-10 00:13:47",
+    "mode": "semgrep",
+    "files_scanned": 26,
+    "files_with_issues": 0
+  }
+}

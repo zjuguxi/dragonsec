@@ -1,0 +1,93 @@
+{
+  "vulnerabilities": [
+    {
+      "source": "ai",
+      "type": "Hardcoded Sensitive Information",
+      "severity": 7,
+      "description": "Sensitive information such as email credentials are loaded from the configuration file without any encryption or secure handling.",
+      "line_number": 171,
+      "file": "icbc_roadtest_checker.py",
+      "risk_analysis": "If the configuration file is accessed by unauthorized users, it could lead to exposure of email credentials.",
+      "recommendation": "Use environment variables or a secure vault to store sensitive information like email credentials."
+    },
+    {
+      "source": "ai",
+      "type": "Insecure Communication",
+      "severity": 8,
+      "description": "The email sending function uses SMTP without enforcing SSL/TLS, which could lead to interception of sensitive information.",
+      "line_number": 178,
+      "file": "icbc_roadtest_checker.py",
+      "risk_analysis": "Without SSL/TLS, email credentials and content could be intercepted by attackers.",
+      "recommendation": "Use smtplib.SMTP_SSL or ensure that the SMTP server supports and enforces TLS."
+    },
+    {
+      "source": "ai",
+      "type": "Improper Error Handling",
+      "severity": 5,
+      "description": "The code does not handle exceptions for file operations, which could lead to crashes if files are missing or inaccessible.",
+      "line_number": 132,
+      "file": "icbc_roadtest_checker.py",
+      "risk_analysis": "If the file does not exist or is inaccessible, the application will crash, leading to a denial of service.",
+      "recommendation": "Add exception handling for file operations to ensure the application can handle missing or inaccessible files gracefully."
+    },
+    {
+      "source": "ai",
+      "type": "Insufficient Logging",
+      "severity": 4,
+      "description": "The application logs sensitive information such as request payloads and headers, which could be exposed in log files.",
+      "line_number": 60,
+      "file": "icbc_roadtest_checker.py",
+      "risk_analysis": "Sensitive information in logs could be accessed by unauthorized users, leading to information leakage.",
+      "recommendation": "Avoid logging sensitive information or ensure logs are securely stored and access-controlled."
+    },
+    {
+      "source": "ai",
+      "type": "Lack of Input Validation",
+      "severity": 6,
+      "description": "User inputs from the configuration file are directly used in requests without validation.",
+      "line_number": 46,
+      "file": "icbc_roadtest_checker.py",
+      "risk_analysis": "Invalid or malicious inputs could lead to unexpected behavior or security vulnerabilities.",
+      "recommendation": "Implement input validation to ensure all inputs meet expected formats and constraints."
+    },
+    {
+      "source": "ai",
+      "type": "Hardcoded Sensitive Information",
+      "severity": 7,
+      "description": "The application collects sensitive information such as email passwords and user credentials through the UI without any encryption or secure handling.",
+      "line_number": 60,
+      "file": "gui/icbc_roadtest_checker_gui.py",
+      "risk_analysis": "If the application is compromised, attackers could gain access to sensitive user information, leading to unauthorized access to user accounts.",
+      "recommendation": "Implement secure storage and transmission for sensitive information using encryption and secure protocols."
+    },
+    {
+      "source": "ai",
+      "type": "Insecure Randomness",
+      "severity": 3,
+      "description": "The code uses the 'random' module to simulate a 10% chance of finding available time, which is not cryptographically secure.",
+      "line_number": 232,
+      "file": "gui/icbc_roadtest_checker_gui.py",
+      "risk_analysis": "While this is used for simulation, if randomness is required for security purposes, it could lead to predictable outcomes.",
+      "recommendation": "Use the 'secrets' module for generating secure random numbers if randomness is needed for security purposes."
+    },
+    {
+      "source": "ai",
+      "type": "Improper Input Validation",
+      "severity": 5,
+      "description": "The application performs basic input validation but lacks comprehensive checks for all input fields.",
+      "line_number": 241,
+      "file": "gui/icbc_roadtest_checker_gui.py",
+      "risk_analysis": "Insufficient input validation could allow malicious input, leading to potential injection attacks or application crashes.",
+      "recommendation": "Enhance input validation by implementing stricter checks and using libraries designed for input validation."
+    }
+  ],
+  "overall_score": 48,
+  "summary": "Found 8 vulnerabilities (0 from semgrep, 8 from AI analysis). Security Score: 48%. Scan completed in 85.35 seconds.",
+  "metadata": {
+    "scan_time": 85.35349917411804,
+    "timestamp": "2025-02-10 00:08:15",
+    "mode": "openai",
+    "files_scanned": 2,
+    "files_with_issues": 2
+  }
+}

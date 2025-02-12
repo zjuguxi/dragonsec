@@ -1,0 +1,103 @@
+{
+  "vulnerabilities": [
+    {
+      "source": "ai",
+      "type": "Insecure Configuration",
+      "severity": 7,
+      "description": "Sensitive information such as email credentials are loaded from a configuration file without any encryption or secure storage mechanism.",
+      "line_number": 173,
+      "file": "icbc_roadtest_checker.py",
+      "risk_analysis": "If the configuration file is accessed by unauthorized users, sensitive information like email credentials can be compromised.",
+      "recommendation": "Use environment variables or a secure vault service to store sensitive information."
+    },
+    {
+      "source": "ai",
+      "type": "Insecure Communication",
+      "severity": 8,
+      "description": "The script uses SMTP without enforcing SSL/TLS for email communication, which may expose sensitive data during transmission.",
+      "line_number": 181,
+      "file": "icbc_roadtest_checker.py",
+      "risk_analysis": "Sensitive information such as email credentials and appointment details could be intercepted by attackers.",
+      "recommendation": "Use smtplib.SMTP_SSL or ensure that the SMTP server enforces TLS."
+    },
+    {
+      "source": "ai",
+      "type": "Improper Error Handling",
+      "severity": 5,
+      "description": "The script logs error messages that may contain sensitive information, such as request payloads and headers.",
+      "line_number": 60,
+      "file": "icbc_roadtest_checker.py",
+      "risk_analysis": "Detailed error logs can expose sensitive information, which may be useful for attackers to exploit further vulnerabilities.",
+      "recommendation": "Sanitize logs to avoid exposing sensitive information and use logging levels appropriately."
+    },
+    {
+      "source": "ai",
+      "type": "Hardcoded Sensitive Data",
+      "severity": 6,
+      "description": "The script contains hardcoded URLs for API endpoints, which may change or be deprecated.",
+      "line_number": 51,
+      "file": "icbc_roadtest_checker.py",
+      "risk_analysis": "If the API endpoint changes, the script may fail to function correctly, and hardcoding URLs can expose internal API structure.",
+      "recommendation": "Store URLs in configuration files or environment variables to allow easy updates and avoid exposing them in the code."
+    },
+    {
+      "source": "ai",
+      "type": "Lack of Input Validation",
+      "severity": 6,
+      "description": "The script does not validate the configuration file's input data, which may lead to unexpected behavior or security issues.",
+      "line_number": 22,
+      "file": "icbc_roadtest_checker.py",
+      "risk_analysis": "Invalid or malicious input data could cause the application to behave unexpectedly or expose vulnerabilities.",
+      "recommendation": "Implement input validation to ensure that configuration data meets expected formats and constraints."
+    },
+    {
+      "source": "ai",
+      "type": "Hardcoded Sensitive Information",
+      "severity": 7,
+      "description": "The application collects sensitive information such as email passwords and user credentials through input fields without any encryption or secure handling.",
+      "line_number": 52,
+      "file": "gui/icbc_roadtest_checker_gui.py",
+      "risk_analysis": "If an attacker gains access to the application or its logs, they could potentially retrieve sensitive user information.",
+      "recommendation": "Implement secure storage and transmission of sensitive information, such as using encryption and secure protocols."
+    },
+    {
+      "source": "ai",
+      "type": "Improper Input Validation",
+      "severity": 5,
+      "description": "The application performs basic input validation for date and time formats but lacks comprehensive validation for other fields like email and password strength.",
+      "line_number": 234,
+      "file": "gui/icbc_roadtest_checker_gui.py",
+      "risk_analysis": "Insufficient input validation can lead to injection attacks or unexpected behavior if malicious input is provided.",
+      "recommendation": "Enhance input validation to include checks for email format, password strength, and other relevant fields."
+    },
+    {
+      "source": "ai",
+      "type": "Lack of Error Handling",
+      "severity": 4,
+      "description": "The application logs errors but does not provide detailed error handling mechanisms.",
+      "line_number": 178,
+      "file": "gui/icbc_roadtest_checker_gui.py",
+      "risk_analysis": "Without proper error handling, the application may crash or behave unpredictably when encountering unexpected situations.",
+      "recommendation": "Implement robust error handling to manage exceptions and provide user-friendly error messages."
+    },
+    {
+      "source": "ai",
+      "type": "Potential Information Disclosure",
+      "severity": 3,
+      "description": "The log area displays messages that could potentially disclose sensitive information if not properly managed.",
+      "line_number": 202,
+      "file": "gui/icbc_roadtest_checker_gui.py",
+      "risk_analysis": "Sensitive information could be exposed in logs, leading to information leakage.",
+      "recommendation": "Ensure that logs do not contain sensitive information and implement log sanitization."
+    }
+  ],
+  "overall_score": 43,
+  "summary": "Found 9 vulnerabilities (0 from semgrep, 9 from AI analysis). Security Score: 43%. Scan completed in 17.65 seconds.",
+  "metadata": {
+    "scan_time": 17.6526780128479,
+    "timestamp": "2025-02-10 13:10:24",
+    "mode": "openai",
+    "files_scanned": 2,
+    "files_with_issues": 2
+  }
+}

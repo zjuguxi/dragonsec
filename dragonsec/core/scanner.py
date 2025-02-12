@@ -196,8 +196,9 @@ async def _async_main():
                        help="Path to cache file (default: no cache between runs)")
     parser.add_argument("--verbose", "-v", action="store_true",
                        help="Show detailed progress information")
-    parser.add_argument("--output-dir", type=str, default="dragonsec/scan_results",
-                       help="Directory to save scan results (default: dragonsec/scan_results)")
+    parser.add_argument("--output-dir", type=str, 
+                       default=os.path.expanduser("~/.dragonsec/scan_results"),
+                       help="Directory to save scan results (default: ~/.dragonsec/scan_results)")
     parser.add_argument("--include-tests", action="store_true",
                        help="Include test files in security scan (default: False)")
     parser.add_argument("--batch-size", type=int, default=4,
