@@ -58,6 +58,7 @@ src/testTestingRootWkspc/coverageWorkspace/.coverage
 # Coverage reports
 htmlcov/
 .coverage
+.coverage.*
 coverage.xml
 
 # Python
@@ -96,3 +97,9 @@ env/
 
 # Scan results
 scan_results/
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
