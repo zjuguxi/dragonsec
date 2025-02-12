@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "dragonsec"
 version = "0.1.0"
 description = "A security scanner combining semgrep with AI analysis"
-authors = [{name = "Xi Gu", email = "zjuguxi@gmail.com"}]
+authors = [{name = "Xi Gu"}]
 readme = "README.md"
 requires-python = ">=3.8"
 classifiers = [
