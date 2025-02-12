@@ -1,5 +1,13 @@
 # DragonSec
 
+<!-- BADGIE TIME -->
+
+![Coverage](https://img.shields.io/badge/coverage-90%25-green)
+![Python Version](https://img.shields.io/badge/python-3.8%2B-blue)
+![License](https://img.shields.io/badge/license-MIT-green)  
+
+<!-- END BADGIE TIME -->
+
 DragonSec is a tool that scans your code for security vulnerabilities using Semgrep and AI.
 
 ## Features
