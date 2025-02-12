@@ -2,7 +2,7 @@
 
 <!-- BADGIE TIME -->
 
-[![Coverage](https://img.shields.io/codecov/c/github/your-username/dragonsec)](https://codecov.io/gh/your-username/dragonsec)
+[![codecov](https://codecov.io/gh/zjuguxi/dragonsec/branch/main/graph/badge.svg)](https://codecov.io/gh/zjuguxi/dragonsec)
 ![Python Version](https://img.shields.io/badge/python-3.8%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)  
 
