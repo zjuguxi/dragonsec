@@ -7,9 +7,10 @@ import hashlib
 import os
 
 class SemgrepRunner:
-    def __init__(self, workers: int = None, cache: Dict = None):
+    def __init__(self, workers: int = None, cache: Dict = None, verbose: bool = False):
         self.workers = workers
         self.cache = cache or {}
+        self.verbose = verbose
 
     async def run_scan(self, target_path: str) -> Dict:
         """Run semgrep scan with optimizations"""
@@ -45,6 +46,9 @@ class SemgrepRunner:
             if process.returncode == 0:
                 try:
                     parsed_result = json.loads(stdout)
+                    if self.verbose:
+                        print(f"Semgrep raw output for {target_path}:")
+                        print(json.dumps(parsed_result, indent=2))
                     self.cache[file_hash] = parsed_result
                     return parsed_result
                 except json.JSONDecodeError:
@@ -72,7 +76,11 @@ class SemgrepRunner:
 
         vulnerabilities = []
         for finding in results.get("results", []):
-            vulnerabilities.append({
+            # 只添加有效的结果
+            if not finding or not finding.get("check_id"):
+                continue
+            
+            vuln = {
                 "source": "semgrep",
                 "type": finding.get("check_id", "unknown"),
                 "severity": self._convert_severity(finding.get("extra", {}).get("severity", "medium")),
@@ -81,7 +89,12 @@ class SemgrepRunner:
                 "file": finding.get("path", ""),
                 "risk_analysis": finding.get("extra", {}).get("metadata", {}).get("impact", "Unknown impact"),
                 "recommendation": finding.get("extra", {}).get("metadata", {}).get("fix", "No fix provided")
-            })
+            }
+            
+            # 只添加有意义的结果
+            if vuln["type"] != "unknown" and vuln["description"]:
+                vulnerabilities.append(vuln)
+            
         return vulnerabilities
 
     def _convert_severity(self, severity: str) -> int:
@@ -95,4 +108,4 @@ class SemgrepRunner:
             "medium": 5,
             "low": 2
         }
-        return severity_map.get(severity, 5) 
+        return severity_map.get(severity.lower(), 5) 
