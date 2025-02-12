@@ -24,7 +24,8 @@ class ScanMode(Enum):
 
 class SecurityScanner:
     def __init__(self, mode: ScanMode = ScanMode.SEMGREP_ONLY, api_key: str = None, 
-                 workers: int = os.cpu_count(), cache: Dict = None, verbose: bool = False):
+                 workers: int = os.cpu_count(), cache: Dict = None, verbose: bool = False,
+                 include_tests: bool = False):
         self.mode = mode
         self.ai_provider = None
         if mode != ScanMode.SEMGREP_ONLY and api_key:
@@ -32,6 +33,10 @@ class SecurityScanner:
         self.semgrep_runner = SemgrepRunner(workers=workers, cache=cache)
         self.file_context = FileContext()
         self.verbose = verbose
+        self.include_tests = include_tests
+        # 定义测试相关的模式
+        self.test_dir_patterns = {'tests', 'test', '__tests__', '__test__', 'testing'}
+        self.test_file_patterns = {'test_', '_test', 'tests.', '.test.', 'spec.', '.spec.'}
 
     def _create_provider(self, mode: ScanMode, api_key: str) -> AIProvider:
         providers = {
@@ -39,6 +44,26 @@ class SecurityScanner:
             ScanMode.GEMINI: GeminiProvider
         }
         return providers[mode](api_key)
+
+    def _is_test_directory(self, path: str) -> bool:
+        """Check if a directory is a test directory"""
+        path_parts = Path(path).parts
+        return any(part.lower() in self.test_dir_patterns for part in path_parts)
+
+    def _is_test_file(self, filename: str) -> bool:
+        """Check if a file is a test file"""
+        filename = filename.lower()
+        return any(pattern in filename for pattern in self.test_file_patterns)
+
+    def _should_skip_path(self, path: str, is_dir: bool = True) -> bool:
+        """Determine if a path should be skipped based on test patterns"""
+        if self.include_tests:
+            return False
+            
+        if is_dir:
+            return self._is_test_directory(path)
+        else:
+            return self._is_test_directory(str(Path(path).parent)) or self._is_test_file(Path(path).name)
 
     async def scan_file(self, file_path: str) -> Dict:
         """Scan a single file"""
@@ -71,17 +96,32 @@ class SecurityScanner:
         start_time = time.time()
         
         if os.path.isfile(path):
+            if self._should_skip_path(path, is_dir=False):
+                print(f"Skipping test file: {path}")
+                return {"vulnerabilities": [], "summary": "Skipped test file"}
+                
             with tqdm(total=1, desc="Scanning files") as pbar:
                 result = await self.scan_file(path)
                 pbar.update(1)
                 return result
+                
         elif os.path.isdir(path):
-            # get all files to scan
             files_to_scan = []
             for root, _, files in os.walk(path):
+                if self._should_skip_path(root):
+                    if self.verbose:
+                        print(f"Skipping test directory: {root}")
+                    continue
+                
                 for file in files:
+                    file_path = os.path.join(root, file)
+                    if self._should_skip_path(file_path, is_dir=False):
+                        if self.verbose:
+                            print(f"Skipping test file: {file_path}")
+                        continue
+                        
                     if file.endswith(('.py', '.js', '.ts', '.java', '.go', '.php')):
-                        files_to_scan.append(os.path.join(root, file))
+                        files_to_scan.append(file_path)
 
             total_files = len(files_to_scan)
             all_results = []
@@ -148,6 +188,8 @@ async def _async_main():
                        help="Show detailed progress information")
     parser.add_argument("--output-dir", type=str, default="dragonsec/scan_results",
                        help="Directory to save scan results (default: dragonsec/scan_results)")
+    parser.add_argument("--include-tests", action="store_true",
+                       help="Include test files in security scan (default: False)")
     args = parser.parse_args()
 
     # validate parameters
@@ -169,7 +211,8 @@ async def _async_main():
         api_key=args.api_key,
         workers=args.workers,
         cache=cache,
-        verbose=args.verbose
+        verbose=args.verbose,
+        include_tests=args.include_tests
     )
     
     try:
