@@ -8,7 +8,11 @@ def openai_provider():
 
 @pytest.mark.asyncio
 async def test_analyze_code_success(openai_provider):
-    mock_response = {
+    mock_response = AsyncMock()
+    mock_response.choices = [AsyncMock()]
+    mock_response.choices[0].message = AsyncMock()
+    mock_response.choices[0].message.content = '''
+    {
         "vulnerabilities": [
             {
                 "type": "SQL Injection",
@@ -23,11 +27,15 @@ async def test_analyze_code_success(openai_provider):
         "overall_score": 80,
         "summary": "Found critical vulnerability"
     }
+    '''
     
-    with patch('openai.AsyncOpenAI.chat.completions.create', new_callable=AsyncMock) as mock_create:
-        mock_create.return_value.choices[0].message.content = str(mock_response)
+    async def mock_create(*args, **kwargs):
+        return mock_response
+
+    with patch('openai.resources.chat.completions.AsyncCompletions.create', 
+              new=mock_create):
         result = await openai_provider.analyze_code(
-            code="SELECT * FROM users WHERE id = " + user_id,
+            code='SELECT * FROM users WHERE id = "' + '123' + '"',
             file_path="/test/src/db.py"
         )
         
@@ -36,7 +44,8 @@ async def test_analyze_code_success(openai_provider):
 
 @pytest.mark.asyncio
 async def test_analyze_code_error(openai_provider):
-    with patch('openai.AsyncOpenAI.chat.completions.create', side_effect=Exception("API Error")):
+    with patch('openai.resources.chat.completions.AsyncCompletions.create', 
+              side_effect=Exception("API Error")):
         result = await openai_provider.analyze_code(
             code="test code",
             file_path="test.py"

@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dragonsec"
+version = "0.1.0"
+description = "A security scanner combining semgrep with AI analysis"
+authors = [{name = "Xi Gu", email = "zjuguxi@gmail.com"}]
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Security",
+    "Programming Language :: Python :: 3.8",
+    "License :: OSI Approved :: MIT License",
+]
+
+dependencies = [
+    "semgrep>=1.107.0",
+    "openai>=1.0.0",
+    "google-generativeai>=0.3.0",
+    "tqdm>=4.65.0",
+    "tenacity>=8.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=6.0.0",
+    "black>=22.0.0",
+    "flake8>=4.0.0",
+    "mypy>=1.0.0",
+]
+
+[project.scripts]
+dragonsec-scan = "dragonsec.core.scanner:main"
+
+[tool.pytest.ini_options]
+markers = [
+    "asyncio: mark test as async test",
+]
+filterwarnings = [
+    "ignore:.*_upb._message.*:DeprecationWarning",
+]
+
+# Test coverage
+addopts = [
+    "--cov=dragonsec",
+    "--cov-report=term-missing",
+    "--cov-report=html"
+]
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function" 
