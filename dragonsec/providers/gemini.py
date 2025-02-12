@@ -3,52 +3,71 @@ from typing import List, Dict, Any, Optional
 import json
 from pathlib import Path
 from .base import AIProvider
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+import time
+import asyncio
 
 class GeminiProvider(AIProvider):
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, max_retries: int = 2):
         genai.configure(api_key=api_key)
         self.model = genai.GenerativeModel('gemini-pro')
         self.context_cache = {}
+        self.max_retries = max_retries
+        self.last_request_time = 0
+        self.min_request_interval = 0.5
 
-    async def analyze_code(self, code: str, file_path: str, context: Dict = None) -> Dict[str, Any]:
-        """Analyze code using Gemini AI for security vulnerabilities"""
-        relative_path = self._get_relative_project_path(file_path)
-        context_info = self._optimize_context(file_path, context) if context else ""
+    async def _throttled_request(self, prompt: str):
+        """Make a throttled request to Gemini API"""
+        current_time = time.time()
+        time_since_last = current_time - self.last_request_time
         
-        prompt = f"""Analyze this code for security vulnerabilities, considering the following context:
-        
-        {context_info}
-        
-        Code to analyze:
-        {code}
-        
-        Required JSON format:
-        {{
-            "vulnerabilities": [
-                {{
-                    "type": "vulnerability type",
-                    "severity": 1-10,
-                    "description": "detailed description",
-                    "line_number": line number,
-                    "file": "relative path from project root (e.g. src/store.js)",
-                    "risk_analysis": "potential impact",
-                    "recommendation": "how to fix"
-                }}
-            ],
-            "overall_score": 0-100,
-            "summary": "brief security assessment"
-        }}
-        
-        Important: 
-        1. Use project-relative paths in the 'file' field.
-        2. The file path relative to project root is: {relative_path}
-        3. Response MUST be valid JSON only, no other text.
-        """
+        if time_since_last < self.min_request_interval:
+            await asyncio.sleep(self.min_request_interval - time_since_last)
         
         try:
+            self.last_request_time = time.time()
             response = await self.model.generate_content_async(prompt)
-            result = json.loads(response.text)
             
+            if not response or not response.text:
+                raise ValueError("Empty response from Gemini API")
+                
+            # 清理响应文本
+            text = response.text.strip()
+            if text.startswith("```"):
+                text = text[text.find("\n")+1:text.rfind("```")].strip()
+            
+            try:
+                result = json.loads(text)
+                return result
+            except json.JSONDecodeError:
+                print(f"Invalid JSON response: {text[:100]}...")
+                raise
+                
+        except Exception as e:
+            if "429" in str(e) or "quota" in str(e).lower():
+                print(f"Rate limit hit, waiting {self.min_request_interval * 2} seconds...")
+                await asyncio.sleep(self.min_request_interval * 2)
+                raise
+            raise
+
+    @retry(
+        stop=stop_after_attempt(2),
+        wait=wait_exponential(multiplier=0.5, min=0.5, max=1),
+        retry=retry_if_exception_type((json.JSONDecodeError, ValueError))  # 只重试特定错误
+    )
+    async def analyze_code(self, code: str, file_path: str, context: Dict = None) -> Dict[str, Any]:
+        try:
+            result = await self._throttled_request(self._build_prompt(code, file_path, context))
+            
+            # 验证结果格式
+            if not isinstance(result, dict):
+                raise ValueError(f"Expected dict response, got {type(result)}")
+                
+            if "vulnerabilities" not in result:
+                result["vulnerabilities"] = []
+                
+            # 修复文件路径
+            relative_path = self._get_relative_project_path(file_path)
             for vuln in result.get("vulnerabilities", []):
                 if "file" not in vuln or not vuln["file"]:
                     vuln["file"] = relative_path
@@ -224,4 +243,36 @@ class GeminiProvider(AIProvider):
                     score -= weight
                     break
         
-        return max(0, min(100, score)) 
+        return max(0, min(100, score))
+
+    def _build_prompt(self, code: str, file_path: str, context: Dict = None) -> str:
+        """Build prompt for Gemini API"""
+        relative_path = self._get_relative_project_path(file_path)
+        context_info = self._optimize_context(file_path, context) if context else ""
+        
+        return f"""You are a security code analyzer. Analyze the following code for security vulnerabilities.
+        
+        Context:
+        {context_info}
+        
+        Code to analyze:
+        {code}
+        
+        Respond ONLY with a JSON object in the following format (no markdown, no other text):
+        {{
+            "vulnerabilities": [
+                {{
+                    "type": "vulnerability type",
+                    "severity": 1-10,
+                    "description": "detailed description",
+                    "line_number": line number,
+                    "file": "{relative_path}",
+                    "risk_analysis": "potential impact",
+                    "recommendation": "how to fix"
+                }}
+            ],
+            "overall_score": 0-100,
+            "summary": "brief security assessment"
+        }}
+        
+        If no vulnerabilities found, return empty array for vulnerabilities. Do not include any markdown formatting or additional text.""" 
