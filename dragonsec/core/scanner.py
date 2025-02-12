@@ -25,7 +25,7 @@ class ScanMode(Enum):
 class SecurityScanner:
     def __init__(self, mode: ScanMode = ScanMode.SEMGREP_ONLY, api_key: str = None, 
                  workers: int = os.cpu_count(), cache: Dict = None, verbose: bool = False,
-                 include_tests: bool = False):
+                 include_tests: bool = False, batch_size: int = 10, batch_delay: float = 2.0):
         self.mode = mode
         self.ai_provider = None
         if mode != ScanMode.SEMGREP_ONLY and api_key:
@@ -34,6 +34,8 @@ class SecurityScanner:
         self.file_context = FileContext()
         self.verbose = verbose
         self.include_tests = include_tests
+        self.batch_size = batch_size
+        self.batch_delay = batch_delay
         # 定义测试相关的模式
         self.test_dir_patterns = {'tests', 'test', '__tests__', '__test__', 'testing'}
         self.test_file_patterns = {'test_', '_test', 'tests.', '.test.', 'spec.', '.spec.'}
@@ -128,23 +130,31 @@ class SecurityScanner:
             semgrep_count = 0
             ai_count = 0
             
-            # create progress bar
+            # Process files in smaller batches
             with tqdm(total=total_files, desc=f"Scanning with {self.mode.value}") as pbar:
-                # create all files scan tasks
-                tasks = [self.scan_file(file) for file in files_to_scan]
-                
-                # execute all tasks concurrently
-                for coro in asyncio.as_completed(tasks):
+                for i in range(0, len(files_to_scan), self.batch_size):
+                    batch = files_to_scan[i:i + self.batch_size]
+                    tasks = [self.scan_file(file) for file in batch]
+                    
                     try:
-                        result = await coro
-                        if result and "vulnerabilities" in result:
-                            vulns = result["vulnerabilities"]
-                            all_results.extend(vulns)
-                            semgrep_count += sum(1 for v in vulns if v.get("source") == "semgrep")
-                            ai_count += sum(1 for v in vulns if v.get("source") == "ai")
+                        batch_results = await asyncio.gather(*tasks)
+                        for result in batch_results:
+                            if result and "vulnerabilities" in result:
+                                vulns = result["vulnerabilities"]
+                                all_results.extend(vulns)
+                                semgrep_count += sum(1 for v in vulns if v.get("source") == "semgrep")
+                                ai_count += sum(1 for v in vulns if v.get("source") == "ai")
+                        pbar.update(len(batch))
+                        
+                        # 成功处理后等待
+                        if i > 0:
+                            await asyncio.sleep(self.batch_delay)
+                            
                     except Exception as e:
-                        print(f"Error scanning file: {e}")
-                    pbar.update(1)
+                        print(f"Error in batch: {e}")
+                        # 出错后增加延迟
+                        await asyncio.sleep(self.batch_delay * 2)
+                        continue
 
             elapsed_time = time.time() - start_time
             
@@ -190,6 +200,10 @@ async def _async_main():
                        help="Directory to save scan results (default: dragonsec/scan_results)")
     parser.add_argument("--include-tests", action="store_true",
                        help="Include test files in security scan (default: False)")
+    parser.add_argument("--batch-size", type=int, default=4,
+                       help="Number of files to process in each batch (default: 4)")
+    parser.add_argument("--batch-delay", type=float, default=0.1,
+                       help="Delay between batches in seconds (default: 0.1)")
     args = parser.parse_args()
 
     # validate parameters
@@ -212,7 +226,9 @@ async def _async_main():
         workers=args.workers,
         cache=cache,
         verbose=args.verbose,
-        include_tests=args.include_tests
+        include_tests=args.include_tests,
+        batch_size=args.batch_size,
+        batch_delay=args.batch_delay
     )
     
     try:
