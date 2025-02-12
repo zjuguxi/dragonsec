@@ -38,6 +38,9 @@ dev = [
 [project.scripts]
 dragonsec-scan = "dragonsec.core.scanner:main"
 
+[tool.setuptools]
+packages = ["dragonsec"]
+
 [tool.pytest.ini_options]
 markers = [
     "asyncio: mark test as async test",
@@ -76,4 +79,9 @@ omit = [
 ]
 
 [tool.coverage.html]
-directory = "htmlcov" 
+directory = "htmlcov"
+
+[tool.pytest]
+pythonpath = [
+    "."
+] 

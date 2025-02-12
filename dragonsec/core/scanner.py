@@ -14,7 +14,7 @@ import hashlib
 from ..providers.base import AIProvider
 from ..providers.openai import OpenAIProvider
 from ..providers.gemini import GeminiProvider
-from ..utils.semgrep import SemgrepRunner
+from dragonsec.utils.semgrep import SemgrepRunner
 from ..utils.file_utils import FileContext
 
 class ScanMode(Enum):
@@ -100,7 +100,11 @@ class SecurityScanner:
         if os.path.isfile(path):
             if self._should_skip_path(path, is_dir=False):
                 print(f"Skipping test file: {path}")
-                return {"vulnerabilities": [], "summary": "Skipped test file"}
+                return {
+                    "vulnerabilities": [],
+                    "summary": "Skipped test file",
+                    "overall_score": 100  # 添加这个字段
+                }
                 
             with tqdm(total=1, desc="Scanning files") as pbar:
                 result = await self.scan_file(path)
