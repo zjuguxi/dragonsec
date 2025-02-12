@@ -93,3 +93,6 @@ env/
 .vscode/
 *.swp
 *.swo
+
+# Scan results
+scan_results/
