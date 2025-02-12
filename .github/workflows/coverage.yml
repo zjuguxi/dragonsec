@@ -6,8 +6,9 @@ jobs:
   coverage:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       pull-requests: write
+      statuses: write
     steps:
       - uses: actions/checkout@v3
       - name: Set up Python
@@ -26,8 +27,7 @@ jobs:
           
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v5
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
           
