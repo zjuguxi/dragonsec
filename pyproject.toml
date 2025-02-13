@@ -36,7 +36,7 @@ dev = [
 ]
 
 [project.scripts]
-dragonsec-scan = "dragonsec.core.scanner:main"
+dragonsec = "dragonsec.core.scanner:main"
 
 [tool.setuptools]
 packages = ["dragonsec"]

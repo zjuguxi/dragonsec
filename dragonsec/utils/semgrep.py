@@ -5,12 +5,20 @@ from typing import Dict, List
 import asyncio
 import hashlib
 import os
+from .rule_manager import RuleManager
 
 class SemgrepRunner:
     def __init__(self, workers: int = None, cache: Dict = None, verbose: bool = False):
         self.workers = workers
         self.cache = cache or {}
         self.verbose = verbose
+        self.rule_manager = RuleManager(verbose=verbose)
+        
+        # 移除规则更新检查
+        if self.verbose:
+            print("Using Semgrep rules:")
+            for rule_id, desc in self.rule_manager.rule_sets.items():
+                print(f"  • {desc} ({rule_id})")
 
     async def run_scan(self, target_path: str) -> Dict:
         """Run semgrep scan with optimizations"""
@@ -21,13 +29,21 @@ class SemgrepRunner:
         if file_hash in self.cache:
             return self.cache[file_hash]
 
+        # 获取针对该文件类型的规则集
+        rules = self.rule_manager.get_rules_for_file(target_path)
+        rule_args = []
+        for rule in rules:
+            rule_args.extend(["--config", rule])
+
         cmd = [
             "semgrep", "scan",
-            "--config", "p/owasp-top-ten",
+            *rule_args,
             "--json",
             "--timeout", "30",
             "--timeout-threshold", "3",
-            "--jobs", str(self.workers),
+            f"--jobs", str(self.workers),
+            "--max-memory", "0",
+            "--optimizations", "all",
             "--exclude", "node_modules,build,dist,*.min.js,venv",
             target_path
         ]

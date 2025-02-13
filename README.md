@@ -11,17 +11,49 @@
 DragonSec is a tool that scans your code for security vulnerabilities using Semgrep and AI.
 
 ## Features
-Now supports OpenAI gpt-4o and Gemini 1.5 pro.
+- Multiple security rule sets:
+  - OWASP Top 10
+  - CI/CD Security
+  - Supply Chain Security
+  - JWT Security
+  - Secrets Detection
+  - Language-specific rules (Python, JavaScript, Go, Java)
+  - Container Security (Docker, Kubernetes)
+- Automatic rule updates (every 7 days)
+- AI-powered analysis (OpenAI GPT-4 and Gemini 1.5 Pro)
+
+## Rule Sets
+DragonSec automatically manages and updates its security rule sets. The rules are:
+- Updated every 7 days
+- Stored in `~/.dragonsec/rules`
+- Include multiple specialized security checks
+
+You can check the rule status with:
+```bash
+dragonsec-scan --list-rules
+```
 
 ## Usage
+
 1. Install the package
 ```bash
 cd dragonsec
 pip install -e .
 ```
-2. Run the scanner
+
+2. Manage security rules
 ```bash
-dragonsec-scan --path <path_to_your_project> --mode <openai|gemini> --api-key <your_api_key>
-dragonsec-scan --path <path_to_your_project> --mode semgrep
+# List available rule sets
+dragonsec rules --list
 ```
-3. Check the results in the `~/.dragonsec/scan_results` directory.
+
+3. Run security scans
+```bash
+# Basic security scan
+dragonsec scan --path <path_to_your_project> --mode semgrep
+
+# AI-enhanced scan
+dragonsec scan --path <path_to_your_project> --mode <openai|gemini> --api-key <your_api_key>
+```
+
+4. Check the results in the `~/.dragonsec/scan_results` directory.
