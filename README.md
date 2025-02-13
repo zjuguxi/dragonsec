@@ -8,52 +8,66 @@
 
 <!-- END BADGIE TIME -->
 
-DragonSec is a tool that scans your code for security vulnerabilities using Semgrep and AI.
+DragonSec is a tool that combines Semgrep's static analysis with AI-powered code review to identify security vulnerabilities in your code.
 
 ## Features
-- Multiple security rule sets:
-  - OWASP Top 10
-  - CI/CD Security
-  - Supply Chain Security
-  - JWT Security
-  - Secrets Detection
+- Intelligent rule selection based on file types:
   - Language-specific rules (Python, JavaScript, Go, Java)
+  - OWASP Top 10 checks
+  - Secrets Detection
   - Container Security (Docker, Kubernetes)
-- Automatic rule updates (every 7 days)
-- AI-powered analysis (OpenAI GPT-4 and Gemini 1.5 Pro)
+- AI-powered analysis:
+  - OpenAI GPT-4 integration
+  - Google Gemini Pro support
+  - Context-aware code review
+- Performance optimizations:
+  - Parallel file processing
+  - Result caching
+  - Smart rule selection
 
-## Rule Sets
-DragonSec automatically manages and updates its security rule sets. The rules are:
-- Updated every 7 days
-- Stored in `~/.dragonsec/rules`
-- Include multiple specialized security checks
+## Prerequisites
 
-You can check the rule status with:
+1. Install the package:
 ```bash
-dragonsec-scan --list-rules
+pip install -e .
+```
+
+2. Install Semgrep:
+```bash
+pip install semgrep
 ```
 
 ## Usage
 
-1. Install the package
+1. Basic security scan (using Semgrep only):
 ```bash
-cd dragonsec
-pip install -e .
+dragonsec scan --path <path_to_your_project> --mode semgrep
 ```
 
-2. Manage security rules
+2. AI-enhanced scan:
 ```bash
-# List available rule sets
+# Using OpenAI
+dragonsec scan --path <path_to_your_project> --mode openai --api-key <your_openai_api_key>
+
+# Using Google Gemini
+dragonsec scan --path <path_to_your_project> --mode gemini --api-key <your_gemini_api_key>
+```
+
+3. View available security rules:
+```bash
 dragonsec rules --list
 ```
 
-3. Run security scans
+4. Additional options:
 ```bash
-# Basic security scan
-dragonsec scan --path <path_to_your_project> --mode semgrep
+# Include test files in scan
+dragonsec scan --path <path> --include-tests
 
-# AI-enhanced scan
-dragonsec scan --path <path_to_your_project> --mode <openai|gemini> --api-key <your_api_key>
+# Adjust parallel processing
+dragonsec scan --path <path> --workers 4
+
+# Enable verbose output
+dragonsec scan --path <path> --verbose
 ```
 
-4. Check the results in the `~/.dragonsec/scan_results` directory.
+Scan results are saved in `~/.dragonsec/scan_results` by default.
