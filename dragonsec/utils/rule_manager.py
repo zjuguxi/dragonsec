@@ -33,33 +33,32 @@ class RuleManager:
         file_ext = Path(file_path).suffix.lower()
         file_name = Path(file_path).name.lower()
         
-        # 基础规则集 - 只保留最重要的
         base_rules = [
-            "p/secrets",  # 敏感信息检查
+            "p/secrets",
         ]
         
-        # 根据文件类型添加特定规则
         ext_rules = {
-            # Python 文件
+            # Python
             '.py': ["p/python", "p/owasp-top-ten"],
             
-            # JavaScript/TypeScript 文件
+            # JavaScript/TypeScript
             '.js': ["p/javascript", "p/owasp-top-ten"],
             '.ts': ["p/javascript", "p/owasp-top-ten"],
             
-            # Java 文件
+            # Java
             '.java': ["p/java", "p/owasp-top-ten"],
             
-            # Go 文件
+            # Go
             '.go': ["p/golang", "p/owasp-top-ten"],
             
-            # 配置文件
+            # Docker
             'dockerfile': ["p/docker"],
+            
+            # Kubernetes
             '.yaml': ["p/kubernetes"],
             '.yml': ["p/kubernetes"]
         }
         
-        # 获取文件特定的规则
         specific_rules = ext_rules.get(file_ext, [])
         if self.verbose:
             print(f"Selected rules for {file_path}: {base_rules + specific_rules}")

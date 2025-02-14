@@ -14,7 +14,6 @@ class SemgrepRunner:
         self.verbose = verbose
         self.rule_manager = RuleManager(verbose=verbose)
         
-        # 移除规则更新检查
         if self.verbose:
             print("Using Semgrep rules:")
             for rule_id, desc in self.rule_manager.rule_sets.items():
@@ -29,7 +28,6 @@ class SemgrepRunner:
         if file_hash in self.cache:
             return self.cache[file_hash]
 
-        # 获取针对该文件类型的规则集
         rules = self.rule_manager.get_rules_for_file(target_path)
         rule_args = []
         for rule in rules:
@@ -92,7 +90,6 @@ class SemgrepRunner:
 
         vulnerabilities = []
         for finding in results.get("results", []):
-            # 只添加有效的结果
             if not finding or not finding.get("check_id"):
                 continue
             
@@ -107,7 +104,6 @@ class SemgrepRunner:
                 "recommendation": finding.get("extra", {}).get("metadata", {}).get("fix", "No fix provided")
             }
             
-            # 只添加有意义的结果
             if vuln["type"] != "unknown" and vuln["description"]:
                 vulnerabilities.append(vuln)
             

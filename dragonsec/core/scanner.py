@@ -42,7 +42,7 @@ class SecurityScanner:
         self.batch_delay = batch_delay
         self.incremental = incremental
         self.last_scan_file = Path.home() / ".dragonsec" / "last_scan.json"
-        # 定义测试相关的模式
+        # Define patterns for test-related files
         self.test_dir_patterns = {'tests', 'test', '__tests__', '__test__', 'testing'}
         self.test_file_patterns = {'test_', '_test', 'tests.', '.test.', 'spec.', '.spec.'}
         self.workers = workers
@@ -76,14 +76,14 @@ class SecurityScanner:
 
     async def scan_file(self, file_path: str) -> Dict:
         """Scan a single file"""
-        # 1. 先运行 semgrep 扫描
+        # 1. Run semgrep scan
         semgrep_results = await self.semgrep_runner.run_scan(file_path)
         
-        # 如果没有配置 AI，直接返回 semgrep 结果
+        # If no AI provider is configured, return semgrep results
         if not self.ai_provider:
             return {"vulnerabilities": self.semgrep_runner.format_results(semgrep_results)}
             
-        # 2. 再运行 AI 分析
+        # 2. Run AI analysis
         try:
             file_context = self.file_context.get_context(file_path)
             ai_results = await self.ai_provider.analyze_code(
@@ -92,7 +92,7 @@ class SecurityScanner:
                 context=file_context
             )
             
-            # 3. 合并两种结果
+            # 3. Merge results
             return self.ai_provider.merge_results(
                 self.semgrep_runner.format_results(semgrep_results),
                 ai_results
@@ -102,7 +102,7 @@ class SecurityScanner:
             return {"vulnerabilities": self.semgrep_runner.format_results(semgrep_results)}
 
     async def process_batch(self, files: List[str]) -> List[Dict]:
-        """并行处理一批文件"""
+        """Process a batch of files in parallel"""
         tasks = [self.scan_file(f) for f in files]
         return await asyncio.gather(*tasks)
 
@@ -117,7 +117,7 @@ class SecurityScanner:
                 return {
                     "vulnerabilities": [],
                     "summary": "Skipped test file",
-                    "overall_score": 100  # 添加这个字段
+                    "overall_score": 100  # Add this field
                 }
                 
             with tqdm(total=1, desc="Scanning files") as pbar:
@@ -163,8 +163,8 @@ class SecurityScanner:
                     }
                 }
 
-            # 分批处理文件
-            all_vulnerabilities = []  # 用一个列表存储所有漏洞
+            # Process files in batches
+            all_vulnerabilities = []  # Use a list to store all vulnerabilities
             semgrep_count = 0
             ai_count = 0
             
@@ -173,12 +173,12 @@ class SecurityScanner:
                     batch = files_to_scan[i:i + self.batch_size]
                     batch_results = await self.process_batch(batch)
                     
-                    # 合并每个文件的结果
+                    # Merge results from each file
                     for result in batch_results:
                         if "vulnerabilities" in result:
                             vulns = result["vulnerabilities"]
                             all_vulnerabilities.extend(vulns)
-                            # 统计来源
+                            # Count sources
                             semgrep_count += sum(1 for v in vulns if v.get("source") == "semgrep")
                             ai_count += sum(1 for v in vulns if v.get("source") == "ai")
                     
@@ -187,12 +187,12 @@ class SecurityScanner:
 
             elapsed_time = time.time() - start_time
             
-            # 计算总体安全分数
+            # Calculate overall security score
             score = 100
             if self.ai_provider and all_vulnerabilities:
                 score = self.ai_provider._calculate_security_score(all_vulnerabilities)
             elif all_vulnerabilities:
-                score = 50  # 如果只有 semgrep 结果，给出中等分数
+                score = 50  # If only semgrep results, give a medium score
             
             return {
                 "vulnerabilities": all_vulnerabilities,
@@ -213,14 +213,14 @@ class SecurityScanner:
             raise FileNotFoundError(f"Path not found: {path}")
 
     async def run_in_process(self, executor, func, *args):
-        """在单独的进程中运行函数"""
+        """Run a function in a separate process"""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(executor, func, *args)
 
     def _get_changed_files(self, path: str) -> List[str]:
-        """获取自上次扫描以来修改的文件"""
+        """Get files changed since last scan"""
         if not self.incremental or not self.last_scan_file.exists():
-            return None  # 返回 None 表示需要全量扫描
+            return None  # Return None to indicate full scan is needed
             
         try:
             with open(self.last_scan_file) as f:
