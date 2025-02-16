@@ -6,6 +6,9 @@ from .base import AIProvider
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 import time
 import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
 
 class GeminiProvider(AIProvider):
     def __init__(self, api_key: str, max_retries: int = 2):
@@ -50,31 +53,31 @@ class GeminiProvider(AIProvider):
                 raise
             raise
 
-    @retry(
-        stop=stop_after_attempt(2),
-        wait=wait_exponential(multiplier=0.5, min=0.5, max=1),
-        retry=retry_if_exception_type((json.JSONDecodeError, ValueError))  # 只重试特定错误
-    )
-    async def analyze_code(self, code: str, file_path: str, context: Dict = None) -> Dict[str, Any]:
+    async def analyze_code(self, code: str, file_path: str, context: Dict = None) -> Dict:
+        """Analyze code using Google's Gemini API"""
         try:
-            result = await self._throttled_request(self._build_prompt(code, file_path, context))
+            # 输入验证
+            if not code or not isinstance(code, str):
+                raise ValueError("Invalid code input")
             
-            # 验证结果格式
-            if not isinstance(result, dict):
-                raise ValueError(f"Expected dict response, got {type(result)}")
-                
-            if "vulnerabilities" not in result:
-                result["vulnerabilities"] = []
-                
-            # 修复文件路径
-            relative_path = self._get_relative_project_path(file_path)
-            for vuln in result.get("vulnerabilities", []):
-                if "file" not in vuln or not vuln["file"]:
-                    vuln["file"] = relative_path
+            # 实现指数退避重试
+            max_retries = 3
+            base_delay = 1.0
             
-            return result
+            for attempt in range(max_retries):
+                try:
+                    response = await self._make_request(code, file_path)
+                    return self._parse_response(response)
+                except Exception as e:
+                    delay = base_delay * (2 ** attempt)
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Attempt {attempt + 1} failed, retrying in {delay}s: {e}")
+                        await asyncio.sleep(delay)
+                    else:
+                        raise
+                    
         except Exception as e:
-            print(f"Error during Gemini analysis: {e}")
+            logger.error(f"Gemini analysis failed: {str(e)}")
             return self._get_default_response()
 
     def merge_results(self, semgrep_results: List[Dict], ai_results: Dict) -> Dict:
@@ -176,7 +179,7 @@ class GeminiProvider(AIProvider):
         return relevant[:max_imports]
 
     def _get_default_response(self) -> Dict:
-        """return default response"""
+        """Return default response"""
         return {
             "vulnerabilities": [],
             "overall_score": 0,
@@ -276,3 +279,35 @@ class GeminiProvider(AIProvider):
         }}
         
         If no vulnerabilities found, return empty array for vulnerabilities. Do not include any markdown formatting or additional text.""" 
+
+    async def _make_request(self, code: str, file_path: str) -> Dict:
+        """Make a request to Gemini API"""
+        prompt = self._build_prompt(code, file_path)
+        
+        try:
+            response = await self._throttled_request(prompt)
+            if isinstance(response, dict):
+                return response
+            return self._get_default_response()
+        except Exception as e:
+            logger.error(f"Error making request: {e}")
+            return self._get_default_response()
+
+    def _parse_response(self, response: Dict) -> Dict:
+        """Parse response from Gemini API"""
+        try:
+            if not isinstance(response, dict):
+                return self._get_default_response()
+            
+            # 确保有必要的字段
+            if "vulnerabilities" not in response:
+                response["vulnerabilities"] = []
+            if "overall_score" not in response:
+                response["overall_score"] = 100
+            if "summary" not in response:
+                response["summary"] = "No issues found"
+            
+            return response
+        except Exception as e:
+            logger.error(f"Error parsing response: {e}")
+            return self._get_default_response() 

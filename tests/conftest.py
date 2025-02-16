@@ -99,4 +99,57 @@ def vulnerable_function():
 """)
     yield file_path
     # 清理文件
-    file_path.unlink(missing_ok=True) 
+    file_path.unlink(missing_ok=True)
+
+def pytest_addoption(parser):
+    """Add custom command line options"""
+    parser.addoption(
+        "--failed-only",
+        action="store_true",
+        default=False,
+        help="只运行上次失败的测试"
+    )
+
+def pytest_configure(config):
+    """Configure pytest"""
+    # 创建失败记录文件的目录
+    cache_dir = Path.home() / ".dragonsec" / "test_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    config.cache.makedir("dragonsec_failures")
+
+def pytest_runtest_logreport(report):
+    """记录测试失败的用例"""
+    if report.when == "call" and report.outcome == "failed":
+        cache_file = Path.home() / ".dragonsec" / "test_cache" / "last_failed.txt"
+        with open(cache_file, "a") as f:
+            f.write(f"{report.nodeid}\n")
+
+def pytest_collection_modifyitems(config, items):
+    """修改测试集合"""
+    if not config.getoption("--failed-only"):
+        return
+        
+    cache_file = Path.home() / ".dragonsec" / "test_cache" / "last_failed.txt"
+    if not cache_file.exists():
+        return
+        
+    try:
+        with open(cache_file) as f:
+            failed_tests = {line.strip() for line in f}
+            
+        selected = []
+        deselected = []
+        for item in items:
+            if item.nodeid in failed_tests:
+                selected.append(item)
+            else:
+                deselected.append(item)
+                
+        if deselected:
+            config.hook.pytest_deselected(items=deselected)
+            items[:] = selected
+            
+        # 清除失败记录
+        cache_file.unlink()
+    except Exception as e:
+        print(f"Warning: Failed to process last failed tests: {e}") 

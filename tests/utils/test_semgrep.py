@@ -89,4 +89,34 @@ def test_format_results_with_metadata():
     formatted = runner.format_results(sample_results)
     assert formatted[0]["severity"] == 8
     assert "risk_analysis" in formatted[0]
-    assert "recommendation" in formatted[0] 
+    assert "recommendation" in formatted[0]
+
+@pytest.mark.asyncio
+async def test_run_scan_with_cache():
+    """Test scanning with cache enabled"""
+    runner = SemgrepRunner(cache={"test_hash": {"results": []}})
+    test_file = Path(__file__).parent / "fixtures" / "test.py"
+    test_file.write_text("print('test')")
+    
+    try:
+        # First scan should use cache
+        file_hash = runner._get_file_hash(str(test_file))
+        runner.cache[file_hash] = {"results": [{"test": "cached"}]}
+        results = await runner.run_scan(str(test_file))
+        assert results == {"results": [{"test": "cached"}]}
+        
+        # Modified file should trigger new scan
+        test_file.write_text("print('modified')")
+        results = await runner.run_scan(str(test_file))
+        assert "results" in results
+        assert results != {"results": [{"test": "cached"}]}
+    finally:
+        test_file.unlink(missing_ok=True)
+
+def test_convert_severity():
+    """Test severity conversion"""
+    runner = SemgrepRunner()
+    assert runner._convert_severity("error") == 9
+    assert runner._convert_severity("warning") == 6
+    assert runner._convert_severity("info") == 3
+    assert runner._convert_severity("unknown") == 5 

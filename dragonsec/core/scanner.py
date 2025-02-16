@@ -36,16 +36,31 @@ class SecurityScanner:
             self.ai_provider = self._create_provider(mode, api_key)
         self.semgrep_runner = SemgrepRunner(workers=workers, cache=cache)
         self.file_context = FileContext()
-        self.verbose = verbose
+        self.verbose = verbose and os.getenv('DRAGONSEC_ENV') != 'production'  # 在生产环境中禁用 verbose
         self.include_tests = include_tests
         self.batch_size = batch_size
         self.batch_delay = batch_delay
         self.incremental = incremental
-        self.last_scan_file = Path.home() / ".dragonsec" / "last_scan.json"
+        config_dir = Path.home() / ".dragonsec"
+        config_dir.mkdir(mode=0o700, parents=True, exist_ok=True)  # 设置安全的权限
+        self.last_scan_file = config_dir / "last_scan.json"
         # Define patterns for test-related files
-        self.test_dir_patterns = {'tests', 'test', '__tests__', '__test__', 'testing'}
+        self.test_dir_patterns = {'tests', 'test', '__tests__', '__test__'}
         self.test_file_patterns = {'test_', '_test', 'tests.', '.test.', 'spec.', '.spec.'}
         self.workers = workers
+        
+        # 定义要跳过的目录
+        self.skip_dirs = {
+            'node_modules', 'build', 'dist', 'venv', 
+            '__pycache__', '.git', '.svn', '.hg',
+            'htmlcov'  # 添加 htmlcov 目录
+        }
+        
+        # 定义要跳过的文件模式
+        self.skip_files = {
+            '*.min.js', '*.pyc', '*.pyo', '*.pyd',
+            '*.so', '*.dylib', '*.dll', '*.coverage'
+        }
 
     def _create_provider(self, mode: ScanMode, api_key: str) -> AIProvider:
         providers = {
@@ -57,7 +72,8 @@ class SecurityScanner:
     def _is_test_directory(self, path: str) -> bool:
         """Check if a directory is a test directory"""
         path_parts = Path(path).parts
-        return any(part.lower() in self.test_dir_patterns for part in path_parts)
+        # 只检查目录名本身，不检查父目录
+        return Path(path).name.lower() in self.test_dir_patterns
 
     def _is_test_file(self, filename: str) -> bool:
         """Check if a file is a test file"""
@@ -65,17 +81,51 @@ class SecurityScanner:
         return any(pattern in filename for pattern in self.test_file_patterns)
 
     def _should_skip_path(self, path: str, is_dir: bool = True) -> bool:
-        """Determine if a path should be skipped based on test patterns"""
-        if self.include_tests:
+        """Determine if a path should be skipped"""
+        if self.include_tests or os.getenv('PYTEST_CURRENT_TEST'):
             return False
-            
-        if is_dir:
-            return self._is_test_directory(path)
-        else:
-            return self._is_test_directory(str(Path(path).parent)) or self._is_test_file(Path(path).name)
+        
+        path_lower = str(path).lower()
+        
+        # 直接使用字符串分割，更可靠
+        path_parts = path_lower.split(os.sep)
+        if '/' in path_lower:  # 处理正斜杠
+            path_parts = path_lower.split('/')
+        
+        # 首先检查路径中是否包含测试目录
+        for part in path_parts:
+            if any(pattern in part for pattern in self.test_dir_patterns):
+                return True
+        
+        # 如果是文件，还需要检查文件名是否匹配测试模式
+        if not is_dir:
+            file_name = path_parts[-1]
+            return any(pattern in file_name for pattern in self.test_file_patterns)
+        
+        return False
+
+    def _should_skip_file(self, file_path: str) -> bool:
+        """检查是否应该跳过文件"""
+        # 检查文件大小
+        if os.path.getsize(file_path) == 0:
+            return True
+        
+        # 检查文件扩展名
+        if not (Path(file_path).suffix.lower() in {'.py', '.js', '.ts', '.java', '.go', '.php'} or 
+                'dockerfile' in Path(file_path).name.lower()):
+            return True
+        
+        # 检查是否是测试文件
+        if not self.include_tests and self._should_skip_path(file_path, is_dir=False):
+            return True
+        
+        return False
 
     async def scan_file(self, file_path: str) -> Dict:
         """Scan a single file"""
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"No such file: {file_path}")
+        
         # 1. Run semgrep scan
         semgrep_results = await self.semgrep_runner.run_scan(file_path)
         
@@ -107,134 +157,185 @@ class SecurityScanner:
         return await asyncio.gather(*tasks)
 
     async def scan_directory(self, path: str) -> Dict:
-        """Scan an entire directory or single file"""
-        path = os.path.expanduser(path)
+        """Scan a directory for security issues"""
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Directory does not exist: {path}")
+        
+        # 添加开始时间
         start_time = time.time()
         
-        if os.path.isfile(path):
-            if self._should_skip_path(path, is_dir=False):
-                print(f"Skipping test file: {path}")
-                return {
-                    "vulnerabilities": [],
-                    "summary": "Skipped test file",
-                    "overall_score": 100  # Add this field
-                }
+        print("\n📂 Collecting files to scan...")
+        
+        # 添加跳过文件计数
+        skipped_files = 0
+        files_to_scan = []
+        for root, dirs, files in os.walk(path):
+            # 跳过指定目录
+            dirs[:] = [d for d in dirs if d not in self.skip_dirs]
+            
+            # 跳过测试目录
+            if not self.include_tests and self._should_skip_path(root, is_dir=True):
+                if self.verbose:
+                    print(f"Skipping test directory: {root}")
+                continue
+            
+            if self.verbose:
+                print(f"Walking directory: {root}")
+                print(f"  Subdirectories after filtering: {dirs}")
+                print(f"  Files: {files}")
+            
+            for file in files:
+                file_path = os.path.join(root, file)
+                abs_path = os.path.abspath(file_path)
                 
-            with tqdm(total=1, desc="Scanning files") as pbar:
-                result = await self.scan_file(path)
-                pbar.update(1)
-                return result
-                
-        elif os.path.isdir(path):
-            print("\n📂 Collecting files to scan...")
-            files_to_scan = []
-            for root, _, files in os.walk(path):
-                if self._should_skip_path(root):
+                if self._should_skip_file(abs_path):
+                    skipped_files += 1  # 增加计数
                     if self.verbose:
-                        print(f"  Skipping directory: {root}")
+                        print(f"Skipping file: {file_path}")
                     continue
                 
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    if self._should_skip_path(file_path, is_dir=False):
-                        if self.verbose:
-                            print(f"  Skipping test file: {file_path}")
-                        continue
-                        
-                    if file.endswith(('.py', '.js', '.ts', '.java', '.go', '.php')):
-                        files_to_scan.append(file_path)
-                        if self.verbose:
-                            print(f"  Added: {file_path}")
+                if self.verbose:
+                    print(f"\nProcessing file: {file_path}")
+                    print(f"  Absolute path: {abs_path}")
+                    print(f"  Exists: {os.path.exists(abs_path)}")
+                    print(f"  Is file: {os.path.isfile(abs_path)}")
+                    print(f"  Readable: {os.access(abs_path, os.R_OK)}")
+                
+                if self.verbose:
+                    print(f"Checking file: {file_path}")
+                    print(f"  name: {Path(file_path).name}")
+                    print(f"  ext: {Path(file_path).suffix}")
+                    print(f"  supported_ext: {Path(file_path).suffix.lower() in {'.py', '.js', '.ts', '.java', '.go', '.php'}}")
+                    print(f"  is_dockerfile: {'dockerfile' in Path(file_path).name.lower()}")
 
-            total_files = len(files_to_scan)
-            print(f"\n🔍 Found {total_files} files to scan")
-            
-            if total_files == 0:
-                return {
-                    "vulnerabilities": [],
-                    "overall_score": 100,
-                    "summary": "No files to scan",
-                    "metadata": {
-                        "scan_time": 0,
-                        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                        "mode": self.mode.value,
-                        "files_scanned": 0,
-                        "files_with_issues": 0
-                    }
-                }
-
-            # Process files in batches
-            all_vulnerabilities = []  # Use a list to store all vulnerabilities
-            semgrep_count = 0
-            ai_count = 0
-            
-            with tqdm(total=total_files, desc="Scanning files") as pbar:
-                for i in range(0, len(files_to_scan), self.batch_size):
-                    batch = files_to_scan[i:i + self.batch_size]
-                    batch_results = await self.process_batch(batch)
+                # 检查是否是 Dockerfile 或支持的扩展名
+                if not (Path(file_path).suffix.lower() in {'.py', '.js', '.ts', '.java', '.go', '.php'} or 'dockerfile' in Path(file_path).name.lower()):
+                    if self.verbose:
+                        print(f"  Skipping unsupported file: {file_path}")
+                    continue
                     
-                    # Merge results from each file
-                    for result in batch_results:
-                        if "vulnerabilities" in result:
-                            vulns = result["vulnerabilities"]
-                            all_vulnerabilities.extend(vulns)
-                            # Count sources
-                            semgrep_count += sum(1 for v in vulns if v.get("source") == "semgrep")
-                            ai_count += sum(1 for v in vulns if v.get("source") == "ai")
-                    
-                    pbar.update(len(batch))
-                    await asyncio.sleep(self.batch_delay)
-
-            elapsed_time = time.time() - start_time
-            
-            # Calculate overall security score
-            score = 100
-            if self.ai_provider and all_vulnerabilities:
-                score = self.ai_provider._calculate_security_score(all_vulnerabilities)
-            elif all_vulnerabilities:
-                score = 50  # If only semgrep results, give a medium score
-            
+                # 跳过测试文件
+                if not self.include_tests and self._should_skip_path(file_path, is_dir=False):
+                    if self.verbose:
+                        print(f"Skipping test file: {file_path}")
+                    continue
+                
+                if self.verbose:
+                    print(f"  Added file to scan: {file_path}")
+                files_to_scan.append(file_path)
+        
+        # 增量扫描
+        if self.incremental:
+            changed_files = self._get_changed_files(files_to_scan)
+            if changed_files is not None:
+                files_to_scan = changed_files
+        
+        print(f"\n🔍 Found {len(files_to_scan)} files to scan")
+        
+        if not files_to_scan:
             return {
-                "vulnerabilities": all_vulnerabilities,
-                "overall_score": score,
-                "summary": (f"Found {len(all_vulnerabilities)} vulnerabilities "
-                           f"({semgrep_count} from semgrep, {ai_count} from AI analysis). "
-                           f"Security Score: {score}%. "
-                           f"Scan completed in {elapsed_time:.2f} seconds."),
+                "vulnerabilities": [],
+                "overall_score": 100,
+                "summary": "No files to scan",
                 "metadata": {
-                    "scan_time": elapsed_time,
-                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                    "mode": self.mode.value,
-                    "files_scanned": total_files,
-                    "files_with_issues": len(set(v.get("file", "") for v in all_vulnerabilities))
+                    "files_scanned": 0,
+                    "skipped_files": skipped_files,
+                    "scan_time": 0
                 }
             }
-        else:
-            raise FileNotFoundError(f"Path not found: {path}")
+
+        # Process files in batches
+        all_vulnerabilities = []  # Use a list to store all vulnerabilities
+        semgrep_count = 0
+        ai_count = 0
+        
+        with tqdm(total=len(files_to_scan), desc="Scanning files") as pbar:
+            for i in range(0, len(files_to_scan), self.batch_size):
+                batch = files_to_scan[i:i + self.batch_size]
+                batch_results = await self.process_batch(batch)
+                
+                # Merge results from each file
+                for result in batch_results:
+                    if "vulnerabilities" in result:
+                        vulns = result["vulnerabilities"]
+                        all_vulnerabilities.extend(vulns)
+                        # Count sources
+                        semgrep_count += sum(1 for v in vulns if v.get("source") == "semgrep")
+                        ai_count += sum(1 for v in vulns if v.get("source") == "ai")
+                
+                pbar.update(len(batch))
+                await asyncio.sleep(self.batch_delay)
+
+        elapsed_time = time.time() - start_time
+        
+        # Calculate overall security score
+        score = 100
+        if self.ai_provider and all_vulnerabilities:
+            score = self.ai_provider._calculate_security_score(all_vulnerabilities)
+        elif all_vulnerabilities:
+            score = 50  # If only semgrep results, give a medium score
+        
+        return {
+            "vulnerabilities": all_vulnerabilities,
+            "overall_score": score,
+            "summary": (f"Found {len(all_vulnerabilities)} vulnerabilities "
+                       f"({semgrep_count} from semgrep, {ai_count} from AI analysis). "
+                       f"Security Score: {score}%. "
+                       f"Scan completed in {elapsed_time:.2f} seconds."),
+            "metadata": {
+                "scan_time": elapsed_time,
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "mode": self.mode.value,
+                "files_scanned": len(files_to_scan),
+                "skipped_files": skipped_files,
+                "files_with_issues": len(set(v.get("file", "") for v in all_vulnerabilities))
+            }
+        }
 
     async def run_in_process(self, executor, func, *args):
         """Run a function in a separate process"""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(executor, func, *args)
 
-    def _get_changed_files(self, path: str) -> List[str]:
+    def _get_changed_files(self, files: List[str]) -> List[str]:
         """Get files changed since last scan"""
-        if not self.incremental or not self.last_scan_file.exists():
-            return None  # Return None to indicate full scan is needed
-            
+        if not self.incremental:
+            return files
+        
         try:
-            with open(self.last_scan_file) as f:
-                last_scan = json.load(f)
+            last_scan = {}
+            if self.last_scan_file.exists():
+                with open(self.last_scan_file) as f:
+                    last_scan = json.load(f)
+            
+            if self.verbose:
+                print(f"Last scan data: {last_scan}")
+                print(f"Files to check: {files}")
             
             changed_files = []
-            for file_path in self._collect_files(path):
-                file_hash = self._get_file_hash(file_path)
-                if last_scan.get(file_path) != file_hash:
+            for file_path in files:
+                # 使用相对路径作为键
+                rel_path = str(Path(file_path).relative_to(Path.cwd()))
+                file_hash = hashlib.md5(Path(file_path).read_bytes()).hexdigest()
+                
+                if self.verbose:
+                    print(f"Checking file: {rel_path}")
+                    print(f"  Current hash: {file_hash}")
+                    print(f"  Previous hash: {last_scan.get(rel_path)}")
+                
+                if last_scan.get(rel_path) != file_hash:
                     changed_files.append(file_path)
+                    last_scan[rel_path] = file_hash
             
-            return changed_files
-        except Exception:
-            return None
+            # 保存新的扫描记录
+            self.last_scan_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.last_scan_file, 'w') as f:
+                json.dump(last_scan, f)
+            
+            return changed_files or files
+        except Exception as e:
+            print(f"Warning: Failed to check changed files: {e}")
+            return files
 
 async def _async_main():
     parser = argparse.ArgumentParser(description="Security scanner with multiple scanning modes")

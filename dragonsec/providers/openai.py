@@ -5,98 +5,47 @@ from pathlib import Path
 from .base import AIProvider
 import asyncio
 from tenacity import retry, stop_after_attempt, wait_exponential
+import logging
+
+logger = logging.getLogger(__name__)
 
 class OpenAIProvider(AIProvider):
     def __init__(self, api_key: str):
         self.client = AsyncOpenAI(api_key=api_key)
         self.context_cache = {}
+        self.SYSTEM_PROMPT = """
+        You are a security expert. You MUST respond with valid JSON only, no markdown formatting or other text.
+        """
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
-    async def analyze_code(self, code: str, file_path: str, context: Dict = None) -> Dict[str, Any]:
-        """Analyze code using AI for security vulnerabilities"""
-        relative_path = self._get_relative_project_path(file_path)
-        context_info = self._optimize_context(file_path, context) if context else ""
-        
-        prompt = f"""Analyze this code for security vulnerabilities, considering the following context:
-        
-        {context_info}
-        
-        Code to analyze:
-        {code}
-        
-        Required JSON format:
-        {{
-            "vulnerabilities": [
-                {{
-                    "type": "vulnerability type",
-                    "severity": 1-10,
-                    "description": "detailed description",
-                    "line_number": line number,
-                    "file": "relative path from project root (e.g. src/store.js)",
-                    "risk_analysis": "potential impact",
-                    "recommendation": "how to fix"
-                }}
-            ],
-            "overall_score": 0-100,
-            "summary": "brief security assessment"
-        }}
-        
-        Important: 
-        1. Use project-relative paths in the 'file' field.
-        2. The file path relative to project root is: {relative_path}
-        3. Response MUST be valid JSON only, no other text.
-        """
-        
+    async def analyze_code(self, code: str, file_path: str, context: Dict = None) -> Dict:
+        """Analyze code for security issues"""
         try:
+            # 验证输入
+            if not code or not isinstance(code, str):
+                raise ValueError("Invalid code input")
+            if not file_path or not isinstance(file_path, str):
+                raise ValueError("Invalid file path")
+            
             response = await self.client.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-4",
                 messages=[
-                    {
-                        "role": "system", 
-                        "content": "You are a security expert. You MUST respond with valid JSON only, no markdown formatting or other text."
-                    },
-                    {"role": "user", "content": prompt}
+                    {"role": "system", "content": self.SYSTEM_PROMPT},
+                    {"role": "user", "content": self._prepare_prompt(code, context)}
                 ],
                 temperature=0.3,
+                max_tokens=2000
             )
             
-            content = response.choices[0].message.content.strip()
-            
-            # clean markdown code block markers
-            if content.startswith('```'):
-                content = content.split('\n', 1)[1]  # Remove first line
-            if content.endswith('```'):
-                content = content.rsplit('\n', 1)[0]  # Remove last line
-            if content.startswith('json'):
-                content = content.split('\n', 1)[1]  # Remove json marker
-                
-            content = content.strip()
-            
             try:
-                result = json.loads(content)
-            except json.JSONDecodeError as e:
-                print(f"Error parsing JSON response: {e}")
-                print(f"Raw response content: {content[:200]}...")
+                result = response.choices[0].message.content
+                return self._parse_response(result)
+            except (KeyError, IndexError, json.JSONDecodeError) as e:
+                logger.error(f"Failed to parse OpenAI response: {e}")
                 return self._get_default_response()
             
-            if not isinstance(result, dict) or "vulnerabilities" not in result:
-                print("Invalid response format from AI")
-                return self._get_default_response()
-            
-            for vuln in result.get("vulnerabilities", []):
-                if "file" not in vuln or not vuln["file"]:
-                    vuln["file"] = relative_path
-                
-                required_fields = ["type", "severity", "description", "line_number", "risk_analysis", "recommendation"]
-                for field in required_fields:
-                    if field not in vuln:
-                        vuln[field] = "unknown" if field != "severity" else 5
-            
-            return result
         except Exception as e:
-            print(f"Error during AI analysis: {str(e)}")
-            if hasattr(e, 'response'):
-                print(f"API Response: {e.response}")
+            logger.error(f"Error in OpenAI analysis: {str(e)}")
             return self._get_default_response()
 
     def merge_results(self, semgrep_results: List[Dict], ai_results: Dict) -> Dict:
@@ -266,3 +215,58 @@ class OpenAIProvider(AIProvider):
                     break
         
         return max(0, min(100, score))
+
+    def _prepare_prompt(self, code: str, context: Dict) -> str:
+        """Prepare the prompt for OpenAI analysis"""
+        context_info = self._optimize_context(code, context) if context else ""
+        
+        prompt = f"""Analyze this code for security vulnerabilities, considering the following context:
+        
+        {context_info}
+        
+        Code to analyze:
+        {code}
+        
+        Required JSON format:
+        {{
+            "vulnerabilities": [
+                {{
+                    "type": "vulnerability type",
+                    "severity": 1-10,
+                    "description": "detailed description",
+                    "line_number": line number,
+                    "file": "relative path from project root (e.g. src/store.js)",
+                    "risk_analysis": "potential impact",
+                    "recommendation": "how to fix"
+                }}
+            ],
+            "overall_score": 0-100,
+            "summary": "brief security assessment"
+        }}
+        
+        Important: 
+        1. Use project-relative paths in the 'file' field.
+        2. The file path relative to project root is: {self._get_relative_project_path(code)}
+        3. Response MUST be valid JSON only, no other text.
+        """
+        
+        return prompt
+
+    def _parse_response(self, result: str) -> List[Dict]:
+        """Parse the response from OpenAI"""
+        # clean markdown code block markers
+        if result.startswith('```'):
+            result = result.split('\n', 1)[1]  # Remove first line
+        if result.endswith('```'):
+            result = result.rsplit('\n', 1)[0]  # Remove last line
+        if result.startswith('json'):
+            result = result.split('\n', 1)[1]  # Remove json marker
+            
+        result = result.strip()
+        
+        try:
+            return json.loads(result)
+        except json.JSONDecodeError as e:
+            logger.error(f"Error parsing JSON response: {e}")
+            logger.error(f"Raw response content: {result[:200]}...")
+            return []

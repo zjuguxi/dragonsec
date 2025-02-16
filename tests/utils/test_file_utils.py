@@ -55,20 +55,20 @@ def test_get_context(sample_file_path):
 def test_get_context_with_imports(fixtures_dir):
     """Test getting file context with imports"""
     code = """
-    import os
-    from pathlib import Path
-    import sys
-    """
+import os
+from pathlib import Path
+import sys
+"""
     test_file = fixtures_dir / "test_imports.py"
-    test_file.write_text(code)
+    test_file.write_text(code.strip())  # 移除前导空格
     
     context = FileContext()
     result = context.get_context(str(test_file))
+    
+    assert result["imports"]  # 确保有导入
     assert "os" in result["imports"]
     assert "pathlib" in result["imports"]
     assert "sys" in result["imports"]
-    
-    test_file.unlink()
 
 def test_find_project_root_with_git():
     """Test finding project root with .git directory"""
@@ -86,4 +86,52 @@ def test_find_project_root_with_git():
         
         context = FileContext()
         root = context.find_project_root(str(test_file))
-        assert root == str(tmpdir) 
+        assert root == str(tmpdir)
+
+def test_file_context_with_large_file(tmp_path):
+    """Test handling of large files"""
+    large_file = tmp_path / "large.py"
+    # 创建一个超过限制的大文件
+    large_content = "x" * (2 * 1024 * 1024)  # 2MB
+    large_file.write_text(large_content)
+    
+    context = FileContext()
+    result = context.get_context(str(large_file))
+    assert result["imports"] == []  # 大文件应该跳过导入分析
+
+def test_file_context_with_complex_imports(tmp_path):
+    """Test handling of complex import patterns"""
+    test_file = tmp_path / "complex_imports.py"
+    content = """
+    import os, sys, json
+    from pathlib import Path
+    from .local_module import something
+    from ..parent_module import another_thing
+    import security.crypto as crypto
+    from auth.utils import *
+    """
+    test_file.write_text(content)
+    
+    context = FileContext()
+    result = context.get_context(str(test_file))
+    assert "os" in result["imports"]
+    assert "sys" in result["imports"]
+    assert "pathlib" in result["imports"]
+    assert "security.crypto" in result["imports"]
+    assert "auth.utils" in result["imports"]
+
+def test_file_context_with_js_imports(tmp_path):
+    """Test handling of JavaScript imports"""
+    test_file = tmp_path / "module.js"
+    content = """
+    const crypto = require('crypto');
+    import { auth } from '@company/auth';
+    import security from './security';
+    """
+    test_file.write_text(content)
+    
+    context = FileContext()
+    result = context.get_context(str(test_file))
+    assert "crypto" in result["imports"]
+    assert "@company/auth" in result["imports"]
+    assert "./security" in result["imports"] 
