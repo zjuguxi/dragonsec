@@ -33,6 +33,7 @@ dev = [
     "black>=22.0.0",
     "flake8>=4.0.0",
     "mypy>=1.0.0",
+    PyYAML>=6.0,
 ]
 
 [project.scripts]
