@@ -12,26 +12,24 @@ class FileContext:
     def __init__(self):
         self.root_indicators = {'.git', 'package.json', 'setup.py', 'pom.xml', 'build.gradle'}
 
+    def _get_scan_root(self) -> Path:
+        """获取扫描根目录"""
+        return Path(os.getenv('DRAGONSEC_SCAN_ROOT', Path.cwd())).resolve()
+
     def get_context(self, file_path: str) -> Dict:
         """Get context information for a file"""
         try:
-            # 验证文件路径
-            path = Path(file_path).resolve()  # 解析符号链接
+            path = Path(file_path).resolve()
             if not path.exists():
                 raise FileNotFoundError(f"File not found: {file_path}")
             if not path.is_file():
                 raise ValueError(f"Not a file: {file_path}")
-                
-            # 检查是否在项目目录内 - 修改这里
-            try:
-                # 允许测试目录下的文件
-                if "test" in str(path).lower() or "pytest" in str(path).lower():
-                    pass
-                else:
-                    path.relative_to(Path.cwd())
-            except ValueError:
-                raise ValueError(f"File path outside project directory: {file_path}")
-                
+            
+            # 使用扫描根目录
+            scan_root = self._get_scan_root()
+            if not str(path).startswith(str(scan_root)):
+                logger.warning(f"File outside scan root: {file_path}")
+            
             with open(path, 'r', encoding='utf-8') as f:
                 content = f.read()
                 
@@ -115,32 +113,31 @@ class FileContext:
 
     def find_related_files(self, file_path: str) -> List[str]:
         try:
-            # 确保文件在项目目录内
             path = Path(file_path).resolve()
-            project_root = Path.cwd().resolve()
+            scan_root = self._get_scan_root()
             
-            if not str(path).startswith(str(project_root)):
-                logger.warning(f"File outside project directory: {file_path}")
-                return []
-            
-            # 安全地查找相关文件
+            # 不再检查是否在项目目录内，而是使用扫描根目录
             file_name = path.stem
             related = []
             
+            # 只在扫描根目录下查找相关文件
             for ext in ['.py', '.js', '.ts', '.java', '.go', '.php']:
-                for p in project_root.rglob(f"*{file_name}*{ext}"):
+                for p in scan_root.rglob(f"*{file_name}*{ext}"):
                     if p.is_file() and p != path:
                         related.append(str(p))
-                    
+                        
             return related[:5]  # 限制返回数量
         except Exception as e:
             logger.error(f"Error finding related files: {e}")
             return []
 
     def get_project_structure(self, root_dir: str) -> Dict[str, List[str]]:
+        # 使用扫描根目录
+        scan_root = self._get_scan_root()
         structure = {}
-        for root, _, files in os.walk(root_dir):
-            rel_path = os.path.relpath(root, root_dir)
+        
+        for root, _, files in os.walk(scan_root):
+            rel_path = os.path.relpath(root, scan_root)
             if rel_path == '.':
                 structure['/'] = files
             else:
@@ -148,9 +145,12 @@ class FileContext:
         return structure
 
     def analyze_dependencies(self, root_dir: str) -> Dict[str, str]:
+        # 使用扫描根目录
+        scan_root = self._get_scan_root()
         dependencies = {}
         
-        requirements_file = Path(root_dir) / 'requirements.txt'
+        # 检查依赖文件
+        requirements_file = scan_root / 'requirements.txt'
         if requirements_file.exists():
             with open(requirements_file, 'r') as f:
                 for line in f:
@@ -158,7 +158,7 @@ class FileContext:
                         name, version = line.strip().split('==')
                         dependencies[name] = version
                         
-        package_json = Path(root_dir) / 'package.json'
+        package_json = scan_root / 'package.json'
         if package_json.exists():
             with open(package_json, 'r') as f:
                 data = json.load(f)

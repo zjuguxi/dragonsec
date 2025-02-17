@@ -7,51 +7,19 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 import time
 import asyncio
 import logging
+import os
+from concurrent.futures import ThreadPoolExecutor
+import threading
 
 logger = logging.getLogger(__name__)
 
 class GeminiProvider(AIProvider):
     def __init__(self, api_key: str, max_retries: int = 2):
+        super().__init__(api_key=api_key)
         genai.configure(api_key=api_key)
         self.model = genai.GenerativeModel('gemini-pro')
         self.context_cache = {}
         self.max_retries = max_retries
-        self.last_request_time = 0
-        self.min_request_interval = 0.5
-
-    async def _throttled_request(self, prompt: str):
-        """Make a throttled request to Gemini API"""
-        current_time = time.time()
-        time_since_last = current_time - self.last_request_time
-        
-        if time_since_last < self.min_request_interval:
-            await asyncio.sleep(self.min_request_interval - time_since_last)
-        
-        try:
-            self.last_request_time = time.time()
-            response = await self.model.generate_content_async(prompt)
-            
-            if not response or not response.text:
-                raise ValueError("Empty response from Gemini API")
-                
-            # 清理响应文本
-            text = response.text.strip()
-            if text.startswith("```"):
-                text = text[text.find("\n")+1:text.rfind("```")].strip()
-            
-            try:
-                result = json.loads(text)
-                return result
-            except json.JSONDecodeError:
-                print(f"Invalid JSON response: {text[:100]}...")
-                raise
-                
-        except Exception as e:
-            if "429" in str(e) or "quota" in str(e).lower():
-                print(f"Rate limit hit, waiting {self.min_request_interval * 2} seconds...")
-                await asyncio.sleep(self.min_request_interval * 2)
-                raise
-            raise
 
     async def analyze_code(self, code: str, file_path: str, context: Dict = None) -> Dict:
         """Analyze code using Google's Gemini API"""
@@ -60,22 +28,37 @@ class GeminiProvider(AIProvider):
             if not code or not isinstance(code, str):
                 raise ValueError("Invalid code input")
             
-            # 实现指数退避重试
-            max_retries = 3
-            base_delay = 1.0
-            
-            for attempt in range(max_retries):
-                try:
-                    response = await self._make_request(code, file_path)
-                    return self._parse_response(response)
-                except Exception as e:
-                    delay = base_delay * (2 ** attempt)
-                    if attempt < max_retries - 1:
-                        logger.warning(f"Attempt {attempt + 1} failed, retrying in {delay}s: {e}")
-                        await asyncio.sleep(delay)
-                    else:
-                        raise
+            # 使用异步锁而不是线程锁
+            async with asyncio.Lock():
+                # 构建提示
+                prompt = self._build_prompt(code, file_path, context)
+                
+                # 直接使用异步 API
+                response = await self.model.generate_content_async(prompt)
+                
+                # 处理响应
+                if not response:
+                    raise ValueError("Empty response from Gemini API")
                     
+                # 获取响应文本
+                if hasattr(response, 'text'):
+                    text = response.text
+                else:
+                    parts = response.parts[0].text if response.parts else ""
+                    text = parts
+                    
+                # 清理响应文本
+                text = text.strip()
+                if text.startswith("```"):
+                    text = text[text.find("\n")+1:text.rfind("```")].strip()
+                    
+                try:
+                    result = json.loads(text)
+                    return self._parse_response(result)
+                except json.JSONDecodeError:
+                    print(f"Invalid JSON response: {text[:100]}...")
+                    raise
+                
         except Exception as e:
             logger.error(f"Gemini analysis failed: {str(e)}")
             return self._get_default_response()
@@ -87,27 +70,57 @@ class GeminiProvider(AIProvider):
         # process semgrep results
         semgrep_vulns = []
         for finding in semgrep_results:
+            # 确保所有必要的字段都存在
             file_path = finding.get("path", "")
             relative_path = self._get_relative_project_path(file_path)
             
-            semgrep_vulns.append({
+            # 提取更详细的信息
+            extra = finding.get("extra", {})
+            metadata = extra.get("metadata", {})
+            
+            vuln = {
                 "source": "semgrep",
                 "type": finding.get("check_id", "unknown"),
-                "severity": self._convert_semgrep_severity(finding.get("extra", {}).get("severity", "medium")),
-                "description": finding.get("extra", {}).get("message", ""),
+                "severity": self._convert_semgrep_severity(extra.get("severity", "medium")),
+                "description": extra.get("message", finding.get("message", "")),  # 尝试两个位置获取描述
                 "line_number": finding.get("start", {}).get("line", 0),
                 "file": relative_path,
-                "risk_analysis": finding.get("extra", {}).get("metadata", {}).get("impact", "Unknown impact"),
-                "recommendation": finding.get("extra", {}).get("metadata", {}).get("fix", "No fix provided")
-            })
+                "risk_analysis": metadata.get("impact", "Potential security vulnerability detected"),
+                "recommendation": metadata.get("fix", extra.get("fix", "Review and fix the identified issue"))
+            }
+            
+            # 添加代码片段如果存在
+            if "lines" in finding:
+                vuln["code_snippet"] = finding["lines"]
+            
+            semgrep_vulns.append(vuln)
 
         all_vulns = semgrep_vulns + [{"source": "ai", **v} for v in ai_vulns]
         score = self._calculate_security_score(all_vulns)
         
+        # 添加更详细的统计信息
+        stats = {
+            "total": len(all_vulns),
+            "semgrep": len(semgrep_vulns),
+            "ai": len(ai_vulns),
+            "by_severity": {
+                "critical": len([v for v in all_vulns if v["severity"] >= 9]),
+                "high": len([v for v in all_vulns if 7 <= v["severity"] < 9]),
+                "medium": len([v for v in all_vulns if 4 <= v["severity"] < 7]),
+                "low": len([v for v in all_vulns if v["severity"] < 4])
+            }
+        }
+        
         return {
             "vulnerabilities": all_vulns,
             "overall_score": score,
-            "summary": f"Found {len(all_vulns)} vulnerabilities ({len(semgrep_vulns)} from semgrep, {len(ai_vulns)} from AI analysis). Security Score: {score}%"
+            "summary": (f"Found {stats['total']} vulnerabilities "
+                       f"({stats['semgrep']} from semgrep, {stats['ai']} from AI analysis). "
+                       f"Security Score: {score}%. "
+                       f"Severity breakdown: {stats['by_severity']['critical']} critical, "
+                       f"{stats['by_severity']['high']} high, "
+                       f"{stats['by_severity']['medium']} medium, "
+                       f"{stats['by_severity']['low']} low.")
         }
 
     # reuse the same helper methods as OpenAIProvider
@@ -279,19 +292,6 @@ class GeminiProvider(AIProvider):
         }}
         
         If no vulnerabilities found, return empty array for vulnerabilities. Do not include any markdown formatting or additional text.""" 
-
-    async def _make_request(self, code: str, file_path: str) -> Dict:
-        """Make a request to Gemini API"""
-        prompt = self._build_prompt(code, file_path)
-        
-        try:
-            response = await self._throttled_request(prompt)
-            if isinstance(response, dict):
-                return response
-            return self._get_default_response()
-        except Exception as e:
-            logger.error(f"Error making request: {e}")
-            return self._get_default_response()
 
     def _parse_response(self, response: Dict) -> Dict:
         """Parse response from Gemini API"""

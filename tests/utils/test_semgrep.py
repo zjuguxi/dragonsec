@@ -8,12 +8,10 @@ def sample_file_path():
 
 @pytest.mark.asyncio
 async def test_run_scan(sample_file_path):
-    runner = SemgrepRunner(verbose=True)
-    try:
-        results = await runner.run_scan(str(sample_file_path))
-        assert "results" in results
-    except Exception as e:
-        pytest.fail(f"Test failed: {e}")
+    runner = SemgrepRunner(workers=1)
+    results = await runner.run_scan(str(sample_file_path))
+    assert "results" in results
+    assert isinstance(results["results"], list)
 
 @pytest.mark.asyncio
 async def test_run_scan_with_rules(fixtures_dir):

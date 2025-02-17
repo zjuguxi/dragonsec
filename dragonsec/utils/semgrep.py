@@ -4,19 +4,82 @@ from typing import Dict, List
 import asyncio
 import hashlib
 import os
+import logging
 from .rule_manager import RuleManager
 
+# 配置 logger
+logger = logging.getLogger(__name__)
+
 class SemgrepRunner:
-    def __init__(self, workers: int = None, cache: Dict = None, verbose: bool = False):
-        self.workers = workers
+    def __init__(self, workers: int = None, cache: Dict = None):
+        self.workers = workers or os.cpu_count()
         self.cache = cache or {}
-        self.verbose = verbose
-        self.rule_manager = RuleManager(verbose=verbose)
+        self.rule_manager = RuleManager()
         
-        if self.verbose:
-            print("Using Semgrep rules:")
-            for rule_id, desc in self.rule_manager.rule_sets.items():
-                print(f"  • {desc} ({rule_id})")
+        # 配置日志级别
+        if os.getenv('DRAGONSEC_DEBUG'):
+            logging.basicConfig(level=logging.DEBUG)
+        else:
+            logging.basicConfig(level=logging.INFO)
+        
+    def _parse_semgrep_output(self, output: str) -> Dict:
+        """Parse semgrep output into structured format"""
+        try:
+            results = json.loads(output)
+            findings = []
+            
+            for result in results.get("results", []):
+                # 提取基本信息
+                path = result.get("path", "")
+                
+                # 获取代码片段
+                start_line = result.get("start", {}).get("line", 0)
+                end_line = result.get("end", {}).get("line", 0)
+                lines = result.get("extra", {}).get("lines", "")
+                
+                # 获取规则信息
+                rule_id = result.get("check_id", "")
+                rule = self.rule_manager.get_rule_details(rule_id)
+                
+                finding = {
+                    "path": path,
+                    "check_id": rule_id,
+                    "start": {"line": start_line},
+                    "end": {"line": end_line},
+                    "lines": lines,
+                    "extra": {
+                        "severity": rule.get("severity", "medium"),
+                        "message": result.get("extra", {}).get("message") or rule.get("message", ""),
+                        "metadata": {
+                            "cwe": rule.get("cwe"),
+                            "owasp": rule.get("owasp"),
+                            "impact": rule.get("impact", "This issue could pose a security risk"),
+                            "fix": rule.get("fix", "Review and fix according to secure coding guidelines")
+                        },
+                        "fix": rule.get("fix_description", ""),
+                        "references": rule.get("references", [])
+                    }
+                }
+                
+                # 添加详细的代码上下文
+                if lines:
+                    finding["extra"]["code_snippet"] = {
+                        "code": lines,
+                        "start_line": start_line,
+                        "end_line": end_line
+                    }
+                
+                findings.append(finding)
+                
+            return {"results": findings}
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse semgrep output: {e}")
+            return {"results": []}
+            
+        except Exception as e:
+            logger.error(f"Error processing semgrep results: {e}")
+            return {"results": []}
 
     async def run_scan(self, target_path: str) -> Dict:
         """Run semgrep scan with optimizations"""
@@ -28,77 +91,77 @@ class SemgrepRunner:
         if not os.access(target_path, os.R_OK):
             raise PermissionError(f"Cannot read path: {target_path}")
         
-        if self.verbose:
-            print(f"\nRunning semgrep scan on: {target_path}")
-        
-        # check cache
+        # 检查缓存
         file_hash = self._get_file_hash(target_path)
         if file_hash in self.cache:
-            if self.verbose:
-                print("Using cached results")
             return self.cache[file_hash]
 
+        # 只获取文件类型相关的规则
         rules = self.rule_manager.get_rules_for_file(target_path)
-        if self.verbose:
-            print(f"Using rules: {rules}")
         
-        # 使用列表而不是字符串来构造命令
+        # 优化 semgrep 命令参数
         cmd = [
             "semgrep",
             "scan",
             "--json",
-            "--timeout", "30",
-            "--timeout-threshold", "3",
-            "--jobs", str(self.workers),
-            "--max-memory", "0",
+            "--timeout", "60",  # 增加单个规则的超时时间到 60 秒
+            "--timeout-threshold", "3",  # 允许更多规则超时
+            "--jobs", str(min(2, self.workers)),  # 限制并行数
+            "--max-memory", "512",  # 内存限制（MB）
             "--optimizations", "all",
             "--exclude", "node_modules,build,dist,*.min.js,venv",
-            "--verbose"
+            "--skip-unknown-extensions",
+            "--max-target-bytes", "1000000",
+            "--no-git-ignore",
+            "--no-rewrite-rule-ids"
         ]
         
-        # 安全地添加规则
+        # 只添加相关的规则
         for rule in rules:
             if not isinstance(rule, str) or '..' in rule:
-                continue  # 跳过可疑的规则
+                continue
             cmd.extend(["--config", rule])
         
         cmd.append(target_path)
-        
-        if self.verbose:
-            print(f"Running command: {' '.join(cmd)}")
 
         try:
             process = await asyncio.create_subprocess_exec(
-                *cmd,  # 使用列表参数，避免 shell 注入
+                *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
             
-            stdout_bytes, stderr_bytes = await process.communicate()
-            stdout = stdout_bytes.decode('utf-8')
-            stderr = stderr_bytes.decode('utf-8')
-
-            if self.verbose:
-                print(f"Semgrep stdout: {stdout}")
-                print(f"Semgrep stderr: {stderr}")
+            # 设置整体超时时间为 120 秒
+            try:
+                stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=120.0  # 增加整体超时时间到 120 秒
+                )
+                stdout = stdout_bytes.decode('utf-8')
+                stderr = stderr_bytes.decode('utf-8')
+            except asyncio.TimeoutError:
+                try:
+                    process.kill()
+                except:
+                    pass
+                logger.warning(f"Semgrep scan timed out for {target_path}")
+                return {"results": []}
 
             if process.returncode == 0:
                 try:
-                    parsed_result = json.loads(stdout)
-                    if self.verbose:
-                        print(f"Semgrep raw output for {target_path}:")
-                        print(json.dumps(parsed_result, indent=2))
+                    parsed_result = self._parse_semgrep_output(stdout)
                     self.cache[file_hash] = parsed_result
                     return parsed_result
                 except json.JSONDecodeError:
-                    print("❌ Failed to parse Semgrep JSON output")
+                    logger.error("Failed to parse Semgrep JSON output")
                     return {"results": []}
             else:
                 if stderr and "No files were analyzed" not in stderr:
-                    print(f"❌ Semgrep execution failed: {stderr}")
+                    logger.error(f"Semgrep execution failed: {stderr}")
                 return {"results": []}
+                
         except Exception as e:
-            print(f"Error running semgrep: {e}")
+            logger.error(f"Error running semgrep: {e}")
             return {"results": []}
 
     def _get_file_hash(self, file_path: str) -> str:
@@ -113,8 +176,6 @@ class SemgrepRunner:
     def format_results(self, results: Dict) -> List[Dict]:
         """Format semgrep results"""
         if not results or "results" not in results:
-            if self.verbose:
-                print("No results from semgrep")
             return []
 
         vulnerabilities = []
@@ -134,9 +195,6 @@ class SemgrepRunner:
             }
             
             vulnerabilities.append(vuln)
-            
-            if self.verbose:
-                print(f"Found vulnerability: {vuln}")
             
         return vulnerabilities
 

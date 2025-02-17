@@ -1,7 +1,12 @@
 import os
 import json
+import yaml
 from pathlib import Path
 from typing import List, Dict
+import logging
+
+# 配置 logger
+logger = logging.getLogger(__name__)
 
 class RuleManager:
     """Manages Semgrep rule sets selection"""
@@ -21,6 +26,9 @@ class RuleManager:
             "p/docker": "Docker Security",
             "p/kubernetes": "Kubernetes Security"
         }
+        self.rules_dir = Path.home() / ".dragonsec" / "rules"
+        self.rules_dir.mkdir(parents=True, exist_ok=True)
+        self.rule_cache = {}
 
     def get_rules_for_file(self, file_path: str) -> List[str]:
         """Get relevant rules based on file type"""
@@ -76,4 +84,32 @@ class RuleManager:
 
     def get_rule_description(self, rule_id: str) -> str:
         """Get description for a rule set"""
-        return self.rule_sets.get(rule_id, "Unknown rule set") 
+        return self.rule_sets.get(rule_id, "Unknown rule set")
+
+    def get_rule_details(self, rule_id: str) -> Dict:
+        """Get detailed information about a specific rule"""
+        if rule_id in self.rule_cache:
+            return self.rule_cache[rule_id]
+            
+        # 从规则文件中加载详细信息
+        rule_file = self.rules_dir / f"{rule_id}.yml"
+        if rule_file.exists():
+            try:
+                with open(rule_file) as f:
+                    rule = yaml.safe_load(f)
+                self.rule_cache[rule_id] = rule
+                return rule
+            except Exception as e:
+                logger.error(f"Error loading rule {rule_id}: {e}")
+                
+        # 如果找不到规则文件，返回基本信息
+        return {
+            "id": rule_id,
+            "severity": "medium",
+            "message": f"Potential security issue detected ({rule_id})",
+            "impact": "This issue could pose a security risk",
+            "fix": "Review the code for security issues",
+            "cwe": "CWE-000",
+            "owasp": "A0:2021 Unknown Risk",
+            "references": []
+        } 

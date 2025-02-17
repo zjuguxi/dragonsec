@@ -12,6 +12,7 @@ from enum import Enum
 import hashlib
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
+import logging
 
 from ..providers.base import AIProvider
 from ..providers.openai import OpenAIProvider
@@ -19,6 +20,9 @@ from ..providers.gemini import GeminiProvider
 from dragonsec.utils.semgrep import SemgrepRunner
 from ..utils.file_utils import FileContext
 from ..utils.rule_manager import RuleManager
+
+# 配置 logger
+logger = logging.getLogger(__name__)
 
 class ScanMode(Enum):
     SEMGREP_ONLY = "semgrep"
@@ -123,33 +127,38 @@ class SecurityScanner:
 
     async def scan_file(self, file_path: str) -> Dict:
         """Scan a single file"""
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"No such file: {file_path}")
-        
-        # 1. Run semgrep scan
-        semgrep_results = await self.semgrep_runner.run_scan(file_path)
-        
-        # If no AI provider is configured, return semgrep results
-        if not self.ai_provider:
-            return {"vulnerabilities": self.semgrep_runner.format_results(semgrep_results)}
-            
-        # 2. Run AI analysis
         try:
-            file_context = self.file_context.get_context(file_path)
-            ai_results = await self.ai_provider.analyze_code(
-                code=file_context["content"],
-                file_path=file_path,
-                context=file_context
-            )
+            # 获取文件上下文
+            context = self.file_context.get_context(file_path)
             
-            # 3. Merge results
-            return self.ai_provider.merge_results(
-                self.semgrep_runner.format_results(semgrep_results),
-                ai_results
-            )
-        except UnicodeDecodeError:
-            print(f"Warning: Could not read {file_path} as text file, skipping AI analysis")
-            return {"vulnerabilities": self.semgrep_runner.format_results(semgrep_results)}
+            # 初始化结果
+            semgrep_results = []
+            ai_results = {"vulnerabilities": []}
+            
+            # 只在 SEMGREP_ONLY 模式或者 incremental 模式下运行 semgrep
+            if self.mode == ScanMode.SEMGREP_ONLY:
+                semgrep_results = await self.semgrep_runner.run_scan(file_path)
+                semgrep_results = self.semgrep_runner.format_results(semgrep_results)
+            
+            # 只在 AI 模式下运行 AI 分析
+            if self.mode != ScanMode.SEMGREP_ONLY and self.ai_provider:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    code = f.read()
+                ai_results = await self.ai_provider.analyze_code(
+                    code=code,
+                    file_path=file_path,
+                    context=context
+                )
+            
+            # 合并结果
+            if self.mode == ScanMode.SEMGREP_ONLY:
+                return {"vulnerabilities": semgrep_results}
+            else:
+                return ai_results
+            
+        except Exception as e:
+            logger.error(f"Error scanning file {file_path}: {e}")
+            return {"vulnerabilities": []}
 
     async def process_batch(self, files: List[str]) -> List[Dict]:
         """Process a batch of files in parallel"""
@@ -157,9 +166,12 @@ class SecurityScanner:
         return await asyncio.gather(*tasks)
 
     async def scan_directory(self, path: str) -> Dict:
-        """Scan a directory for security issues"""
+        """Scan a directory recursively"""
         if not os.path.exists(path):
-            raise FileNotFoundError(f"Directory does not exist: {path}")
+            raise FileNotFoundError(f"Directory {path} does not exist")
+        
+        # 设置扫描根目录环境变量
+        os.environ['DRAGONSEC_SCAN_ROOT'] = str(Path(path).resolve())
         
         # 添加开始时间
         start_time = time.time()
@@ -266,6 +278,7 @@ class SecurityScanner:
                 pbar.update(len(batch))
                 await asyncio.sleep(self.batch_delay)
 
+        # 计算扫描时间
         elapsed_time = time.time() - start_time
         
         # Calculate overall security score
