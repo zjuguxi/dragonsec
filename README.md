@@ -84,3 +84,65 @@ Results are saved in JSON format with:
 - Risk analysis
 - Remediation recommendations
 - Overall security score
+
+## Command Line Usage
+
+DragonSec provides several commands and options:
+
+### Main Commands
+
+```bash
+dragonsec scan   # Run security scan
+dragonsec rules  # List available security rules
+```
+
+### Scan Command Options
+
+```bash
+dragonsec scan [OPTIONS]
+
+Required:
+  --path PATH               Path to scan (file or directory)
+
+Scan Mode:
+  --mode MODE              Scanning mode [default: semgrep]
+                          Choices: 
+                          - semgrep (basic static analysis)
+                          - openai (GPT-4o enhanced)
+                          - gemini (Gemini-1.5-flash enhanced)
+                          - deepseek (Deepseek R1 enhanced)
+
+Authentication:
+  --api-key KEY            API key for AI service (required for AI modes)
+
+Performance:
+  --batch-size N          Files to process per batch [default: 4]
+  --batch-delay SECONDS   Delay between batches [default: 0.1]
+
+File Selection:
+  --include-tests         Include test files in scan [default: False]
+
+Output:
+  --output-dir DIR        Directory for scan results [default: ~/.dragonsec/scan_results]
+  --verbose, -v          Show detailed progress [default: False]
+```
+
+### Example Commands
+
+```bash
+# Basic scan with default settings
+dragonsec scan --path ./myproject
+
+# AI-enhanced scan
+dragonsec scan \
+  --path ./myproject \
+  --mode openai \
+  --api-key $OPENAI_API_KEY \
+  --batch-size 4 \
+  --batch-delay 0.2 \
+  --include-tests \
+  --verbose
+
+# View available security rules
+dragonsec rules
+```

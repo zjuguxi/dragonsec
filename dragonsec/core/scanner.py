@@ -432,22 +432,24 @@ class SecurityScanner:
         }
 
 async def _async_main():
-    parser = argparse.ArgumentParser(description="Security scanner with multiple scanning modes")
+    """Main async function"""
+    parser = argparse.ArgumentParser(
+        description="DragonSec - AI-enhanced security scanner"
+    )
     
-    # Create subparsers for different commands
-    subparsers = parser.add_subparsers(dest='command', help='Available commands')
+    subparsers = parser.add_subparsers(dest='command', required=True)
     
     # Scan command
     scan_parser = subparsers.add_parser('scan', help='Scan code for security issues')
     scan_parser.add_argument("--path", type=str, required=True, help="Path to scan (file or directory)")
     scan_parser.add_argument("--mode", type=str, choices=[mode.value for mode in ScanMode], 
                            default=ScanMode.SEMGREP_ONLY.value,
-                           help="Scanning mode: semgrep (basic scan), openai (AI-enhanced scan), or gemini")
-    scan_parser.add_argument("--api-key", type=str, help="API key for AI service (required for openai and gemini modes)")
-    scan_parser.add_argument("--workers", type=int, default=os.cpu_count(),
-                           help="Number of parallel workers (default: number of CPU cores)")
-    scan_parser.add_argument("--cache", type=str, default=None,
-                           help="Path to cache file (default: no cache between runs)")
+                           help="Scanning mode: semgrep (basic scan), openai (GPT-4o), gemini (Gemini-1.5-flash), or deepseek (R1)")
+    scan_parser.add_argument("--api-key", type=str, help="API key for AI service (required for AI modes)")
+    scan_parser.add_argument("--batch-size", type=int, default=4,
+                           help="Number of files to process in each batch (default: 4)")
+    scan_parser.add_argument("--batch-delay", type=float, default=0.1,
+                           help="Delay between batches in seconds (default: 0.1)")
     scan_parser.add_argument("--verbose", "-v", action="store_true",
                            help="Show detailed progress information")
     scan_parser.add_argument("--output-dir", type=str, 
@@ -455,14 +457,9 @@ async def _async_main():
                            help="Directory to save scan results (default: ~/.dragonsec/scan_results)")
     scan_parser.add_argument("--include-tests", action="store_true",
                            help="Include test files in security scan (default: False)")
-    scan_parser.add_argument("--batch-size", type=int, default=4,
-                           help="Number of files to process in each batch (default: 4)")
-    scan_parser.add_argument("--batch-delay", type=float, default=0.1,
-                           help="Delay between batches in seconds (default: 0.1)")
 
-    # List rules command
-    list_rules_parser = subparsers.add_parser('rules', help='List available security rules')
-    list_rules_parser.add_argument('--list', action='store_true', help='List all available rule sets')
+    # Rules command (simplified)
+    subparsers.add_parser('rules', help='List available security rules')
 
     args = parser.parse_args()
 
@@ -480,20 +477,9 @@ async def _async_main():
         if mode != ScanMode.SEMGREP_ONLY and not args.api_key:
             parser.error(f"--api-key is required for {mode.value} mode")
 
-        # load cache
-        cache = {}
-        if args.cache and os.path.exists(args.cache):
-            try:
-                with open(args.cache, 'r') as f:
-                    cache = json.load(f)
-            except Exception as e:
-                print(f"Warning: Failed to load cache file: {e}")
-
         scanner = SecurityScanner(
             mode=mode,
             api_key=args.api_key,
-            workers=args.workers,
-            cache=cache,
             verbose=args.verbose,
             include_tests=args.include_tests,
             batch_size=args.batch_size,
@@ -516,11 +502,6 @@ async def _async_main():
             # Save report
             with open(report_file, 'w', encoding='utf-8') as f:
                 json.dump(results, f, indent=2, ensure_ascii=False)
-            
-            # Save cache
-            if args.cache:
-                with open(args.cache, 'w') as f:
-                    json.dump(scanner.semgrep_runner.cache, f)
             
             # Print results
             print("\n" + "="*80)
