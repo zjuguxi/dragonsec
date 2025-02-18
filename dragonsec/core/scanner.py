@@ -24,6 +24,7 @@ from dragonsec.utils.semgrep import SemgrepRunner
 from ..utils.file_utils import FileContext
 from ..utils.rule_manager import RuleManager
 from ..providers.deepseek import DeepseekProvider
+from ..config import DEFAULT_CONFIG
 
 # 配置 logger
 logger = logging.getLogger(__name__)
@@ -60,41 +61,35 @@ def time_async(func):
     return wrapper
 
 class SecurityScanner:
-    def __init__(self, mode: ScanMode = ScanMode.SEMGREP_ONLY, api_key: str = None, 
-                 workers: int = os.cpu_count(), cache: Dict = None, verbose: bool = False,
-                 include_tests: bool = False, batch_size: int = 10, batch_delay: float = 2.0,
-                 incremental: bool = False):
+    def __init__(self, mode: ScanMode = ScanMode.SEMGREP_ONLY, 
+                 api_key: str = None, verbose: bool = False,
+                 include_tests: bool = False, batch_size: int = None, 
+                 batch_delay: float = None):
         self.mode = mode
-        self.ai_provider = None
-        if mode != ScanMode.SEMGREP_ONLY and api_key:
-            self.ai_provider = self._create_provider(mode, api_key)
-        self.semgrep_runner = SemgrepRunner(workers=workers, cache=cache)
+        self.ai_provider = self._create_provider(mode, api_key) if mode != ScanMode.SEMGREP_ONLY else None
+        self.semgrep_runner = SemgrepRunner()
         self.file_context = FileContext()
-        self.verbose = verbose and os.getenv('DRAGONSEC_ENV') != 'production'  # 在生产环境中禁用 verbose
+        self.verbose = verbose
         self.include_tests = include_tests
-        self.batch_size = batch_size
-        self.batch_delay = batch_delay
-        self.incremental = incremental
-        config_dir = Path.home() / ".dragonsec"
-        config_dir.mkdir(mode=0o700, parents=True, exist_ok=True)  # 设置安全的权限
-        self.last_scan_file = config_dir / "last_scan.json"
-        # Define patterns for test-related files
-        self.test_dir_patterns = {'tests', 'test', '__tests__', '__test__'}
-        self.test_file_patterns = {'test_', '_test', 'tests.', '.test.', 'spec.', '.spec.'}
-        self.workers = workers
+        self.batch_size = batch_size or DEFAULT_CONFIG['batch_size']
+        self.batch_delay = batch_delay or DEFAULT_CONFIG['batch_delay']
         
-        # 定义要跳过的目录
-        self.skip_dirs = {
-            'node_modules', 'build', 'dist', 'venv', 
-            '__pycache__', '.git', '.svn', '.hg',
-            'htmlcov'  # 添加 htmlcov 目录
+        # 使用配置文件中的值
+        self.skip_dirs = DEFAULT_CONFIG['skip_dirs']
+        self.test_dir_patterns = DEFAULT_CONFIG['test_dir_patterns']
+        self.test_file_patterns = DEFAULT_CONFIG['test_file_patterns']
+        
+        # 支持的文件类型
+        self.supported_extensions = {
+            'py', 'js', 'java',  # 不带点号
+            '.py', '.js', '.java'  # 带点号
         }
         
-        # 定义要跳过的文件模式
-        self.skip_files = {
-            '*.min.js', '*.pyc', '*.pyo', '*.pyd',
-            '*.so', '*.dylib', '*.dll', '*.coverage'
-        }
+        # 启用调试日志
+        if verbose:
+            logging.getLogger('dragonsec').setLevel(logging.DEBUG)
+            logger.debug("Debug logging enabled")
+            logger.debug(f"Supported extensions: {self.supported_extensions}")
 
     def _create_provider(self, mode: ScanMode, api_key: str) -> AIProvider:
         providers = {
@@ -104,56 +99,52 @@ class SecurityScanner:
         }
         return providers[mode](api_key)
 
-    def _is_test_directory(self, path: str) -> bool:
-        """Check if a directory is a test directory"""
-        path_parts = Path(path).parts
-        # 只检查目录名本身，不检查父目录
-        return Path(path).name.lower() in self.test_dir_patterns
-
-    def _is_test_file(self, filename: str) -> bool:
-        """Check if a file is a test file"""
-        filename = filename.lower()
-        return any(pattern in filename for pattern in self.test_file_patterns)
-
-    def _should_skip_path(self, path: str, is_dir: bool = True) -> bool:
-        """Determine if a path should be skipped"""
-        if self.include_tests or os.getenv('PYTEST_CURRENT_TEST'):
-            return False
-        
-        path_lower = str(path).lower()
-        
-        # 直接使用字符串分割，更可靠
-        path_parts = path_lower.split(os.sep)
-        if '/' in path_lower:  # 处理正斜杠
-            path_parts = path_lower.split('/')
-        
-        # 首先检查路径中是否包含测试目录
-        for part in path_parts:
-            if any(pattern in part for pattern in self.test_dir_patterns):
-                return True
-        
-        # 如果是文件，还需要检查文件名是否匹配测试模式
-        if not is_dir:
-            file_name = path_parts[-1]
-            return any(pattern in file_name for pattern in self.test_file_patterns)
-        
-        return False
-
     def _should_skip_file(self, file_path: str) -> bool:
         """检查是否应该跳过文件"""
-        # 检查文件大小
-        if os.path.getsize(file_path) == 0:
-            return True
+        path = Path(file_path)
         
-        # 检查文件扩展名
-        if not (Path(file_path).suffix.lower() in {'.py', '.js', '.ts', '.java', '.go', '.php'} or 
-                'dockerfile' in Path(file_path).name.lower()):
+        # 空文件检查
+        if path.stat().st_size == 0:
+            logger.debug(f"Skipping empty file: {file_path}")
             return True
+            
+        # 扩展名检查
+        file_ext = path.suffix.lower()  # 保留点号
+        file_ext_no_dot = file_ext.lstrip('.')  # 不带点号
+        is_dockerfile = 'dockerfile' in path.name.lower()
         
-        # 检查是否是测试文件
-        if not self.include_tests and self._should_skip_path(file_path, is_dir=False):
+        # 详细的调试信息
+        logger.debug(f"Checking file: {file_path}")
+        logger.debug(f"File extension (with dot): {file_ext}")
+        logger.debug(f"File extension (no dot): {file_ext_no_dot}")
+        logger.debug(f"Is Dockerfile: {is_dockerfile}")
+        logger.debug(f"Supported extensions: {self.supported_extensions}")
+        
+        # 分开检查每个条件
+        should_scan = (
+            file_ext in self.supported_extensions or
+            file_ext_no_dot in self.supported_extensions or
+            is_dockerfile
+        )
+        
+        if not should_scan:
+            logger.debug(f"Skipping unsupported file type: {file_path}")
             return True
+            
+        # 测试文件检查
+        if not self.include_tests:
+            # 检查是否在测试目录中，但排除 fixtures 目录
+            path_parts = [p.lower() for p in path.parts]
+            if 'tests' in path_parts and 'fixtures' not in path_parts:
+                logger.debug(f"Skipping test directory: {file_path}")
+                return True
+            
+            # 检查文件名是否包含测试模式
+            if any(pattern in path.name.lower() for pattern in self.test_file_patterns):
+                logger.debug(f"Skipping test file: {file_path}")
+                return True
         
+        logger.debug(f"File will be scanned: {file_path}")
         return False
 
     @time_async
@@ -240,15 +231,20 @@ class SecurityScanner:
             files_to_scan, skipped_count = self._collect_files(directory)
             total_files = len(files_to_scan)
             
+            # 添加调试日志
+            logger.debug(f"Files to scan: {files_to_scan}")
+            logger.debug(f"Total files: {total_files}")
+            logger.debug(f"Skipped files: {skipped_count}")
+            
             if not files_to_scan:
-                logger.info("No files to scan")
+                logger.warning("No files to scan - check file type filters and skip patterns")
                 return {
                     "vulnerabilities": [],
                     "overall_score": 100,
                     "summary": "No files to scan",
                     "metadata": {
                         "files_scanned": 0,
-                        "skipped_files": skipped_count,  # 使用实际跳过的文件数
+                        "skipped_files": skipped_count,
                         "scan_duration": 0,
                         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                         "mode": self.mode.value
@@ -315,7 +311,7 @@ class SecurityScanner:
                     "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
                     "mode": self.mode.value,
                     "files_scanned": total_files,
-                    "skipped_files": skipped_count,  # 使用实际跳过的文件数
+                    "skipped_files": skipped_count,
                     "files_with_issues": files_with_issues,
                     "semgrep_findings": semgrep_findings,
                     "ai_findings": ai_findings
@@ -325,21 +321,6 @@ class SecurityScanner:
         except Exception as e:
             logger.error(f"Error scanning directory: {e}")
             return self._get_error_result()
-
-    async def _scan_file_with_progress(self, file_path: str, semaphore: asyncio.Semaphore, 
-                                     progress: tqdm) -> Dict:
-        """Scan a single file and update progress"""
-        try:
-            async with semaphore:
-                result = await self.scan_file(file_path)
-                progress.update(1)  # 更新进度
-                progress.refresh()  # 强制刷新显示
-                return result
-        except Exception as e:
-            logger.error(f"Error scanning file {file_path}: {e}")
-            progress.update(1)  # 即使出错也更新进度
-            progress.refresh()
-            return {"vulnerabilities": []}
 
     def _collect_files(self, directory: str) -> Tuple[List[str], int]:
         """Collect files to scan and return tuple of (files_to_scan, skipped_count)"""
@@ -354,15 +335,21 @@ class SecurityScanner:
                 for file in files:
                     file_path = os.path.join(root, file)
                     
+                    # 添加调试日志
+                    logger.debug(f"Checking file: {file_path}")
+                    logger.debug(f"File extension: {Path(file_path).suffix.lstrip('.')}")
+                    logger.debug(f"Supported extensions: {self.supported_extensions}")
+                    
                     # 检查文件是否应该跳过
                     if self._should_skip_file(file_path):
                         skipped_count += 1
                         logger.debug(f"Skipping file: {file_path}")
                         continue
                     
+                    logger.debug(f"Adding file to scan: {file_path}")
                     files_to_scan.append(file_path)
-                    
-            logger.debug(f"Found {len(files_to_scan)} files to scan, skipped {skipped_count} files")
+            
+            logger.info(f"Found {len(files_to_scan)} files to scan, skipped {skipped_count} files")
             return files_to_scan, skipped_count
             
         except Exception as e:
@@ -377,46 +364,6 @@ class SecurityScanner:
             return 50  # If only semgrep results, give a medium score
         else:
             return 100  # No vulnerabilities found
-
-    def _get_changed_files(self, files: List[str]) -> List[str]:
-        """Get files changed since last scan"""
-        if not self.incremental:
-            return files
-        
-        try:
-            last_scan = {}
-            if self.last_scan_file.exists():
-                with open(self.last_scan_file) as f:
-                    last_scan = json.load(f)
-            
-            if self.verbose:
-                print(f"Last scan data: {last_scan}")
-                print(f"Files to check: {files}")
-            
-            changed_files = []
-            for file_path in files:
-                # 使用相对路径作为键
-                rel_path = str(Path(file_path).relative_to(Path.cwd()))
-                file_hash = hashlib.md5(Path(file_path).read_bytes()).hexdigest()
-                
-                if self.verbose:
-                    print(f"Checking file: {rel_path}")
-                    print(f"  Current hash: {file_hash}")
-                    print(f"  Previous hash: {last_scan.get(rel_path)}")
-                
-                if last_scan.get(rel_path) != file_hash:
-                    changed_files.append(file_path)
-                    last_scan[rel_path] = file_hash
-            
-            # 保存新的扫描记录
-            self.last_scan_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.last_scan_file, 'w') as f:
-                json.dump(last_scan, f)
-            
-            return changed_files or files
-        except Exception as e:
-            print(f"Warning: Failed to check changed files: {e}")
-            return files
 
     def _get_error_result(self) -> Dict:
         """Get error result"""

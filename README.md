@@ -60,11 +60,24 @@ dragonsec scan --path /path/to/code --mode semgrep
 
 ## Configuration
 
-- `--batch-size`: Number of files to process in parallel (default: 4)
-- `--batch-delay`: Delay between batches in seconds (default: 0.1)
-- `--include-tests`: Include test files in scan (default: False)
-- `--verbose`: Show detailed progress information
-- `--output-dir`: Custom directory for scan results (default: ~/.dragonsec/scan_results)
+DragonSec uses a default configuration that can be customized:
+
+```python
+# Custom configuration
+DEFAULT_CONFIG = {
+    'skip_dirs': {'node_modules', 'build', ...},
+    'batch_size': 4,
+    'batch_delay': 0.1,
+    ...
+}
+```
+
+You can override these settings using command line options:
+- `--batch-size`: Number of files to process in parallel
+- `--batch-delay`: Delay between batches in seconds
+- `--include-tests`: Include test files in scan
+- `--verbose`: Show detailed progress
+- `--output-dir`: Custom directory for scan results
 
 ## Supported Languages
 

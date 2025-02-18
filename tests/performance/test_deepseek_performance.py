@@ -10,61 +10,22 @@ logger = logging.getLogger(__name__)
 
 @pytest.mark.asyncio
 async def test_deepseek_performance():
-    """Test Deepseek scanning performance"""
-    # 创建测试文件
-    test_dir = Path(__file__).parent / "test_files"
-    test_dir.mkdir(exist_ok=True)
+    """Test Deepseek provider performance"""
+    scanner = SecurityScanner(
+        mode=ScanMode.DEEPSEEK,
+        api_key="test-key",
+        batch_size=2,  # 使用小批次进行测试
+        batch_delay=0.1
+    )
     
-    # 创建一些测试文件
-    test_files = [
-        ("sql_injection.py", """
-def unsafe_query(user_input):
-    return f"SELECT * FROM users WHERE id = {user_input}"
-        """),
-        ("xss.js", """
-function displayUser(userInput) {
-    document.innerHTML = userInput;  // XSS vulnerability
-}
-        """),
-        ("command_injection.py", """
-import os
-def run_command(cmd):
-    os.system(cmd)  // Command injection
-        """)
-    ]
+    # 使用测试文件
+    test_file = Path(__file__).parent.parent / "fixtures" / "sample_file.py"
+    start_time = time.perf_counter()
     
-    for filename, content in test_files:
-        (test_dir / filename).write_text(content)
+    result = await scanner.scan_file(str(test_file))
     
-    try:
-        # 初始化扫描器
-        scanner = SecurityScanner(
-            mode=ScanMode.DEEPSEEK,
-            api_key="your-api-key",
-            batch_size=2,
-            batch_delay=0.5
-        )
-        
-        # 记录开始时间
-        start = time.perf_counter()
-        
-        # 运行扫描
-        results = await scanner.scan_directory(str(test_dir))
-        
-        # 计算总时间
-        elapsed = time.perf_counter() - start
-        
-        # 记录性能指标
-        logger.info(f"Total scan time: {elapsed:.2f} seconds")
-        logger.info(f"Files scanned: {results['metadata']['files_scanned']}")
-        logger.info(f"Average time per file: {elapsed/len(test_files):.2f} seconds")
-        logger.info(f"Vulnerabilities found: {len(results['vulnerabilities'])}")
-        
-    finally:
-        # 清理测试文件
-        for file in test_dir.glob("*"):
-            file.unlink()
-        test_dir.rmdir()
+    duration = time.perf_counter() - start_time
+    assert duration < 60  # 确保单文件扫描不超过60秒
 
 if __name__ == "__main__":
     asyncio.run(test_deepseek_performance()) 

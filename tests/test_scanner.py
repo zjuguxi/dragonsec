@@ -10,6 +10,8 @@ import asyncio
 import os
 import sqlite3
 import pickle
+import logging
+import json
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_fixtures():
@@ -302,6 +304,9 @@ def verify_files_exist(directory: Path, expected_count: int) -> bool:
 @pytest.mark.asyncio
 async def test_scan_with_different_file_types():
     """Test scanning different file types"""
+    # 启用调试日志
+    logging.basicConfig(level=logging.DEBUG)
+    
     scanner = SecurityScanner(mode=ScanMode.SEMGREP_ONLY, verbose=True)
     test_dir = Path(__file__).parent / "fixtures" / "mixed_files"
     test_dir.mkdir(parents=True, exist_ok=True)
@@ -334,6 +339,8 @@ ENV DB_PASSWORD=secret123
         
         results = await scanner.scan_directory(str(test_dir))
         print(f"Files found: {[str(p) for p in Path(test_dir).glob('*')]}")
+        print(f"Scan results: {json.dumps(results, indent=2)}")
+        
         assert results["metadata"]["files_scanned"] == 4
     finally:
         shutil.rmtree(test_dir)
