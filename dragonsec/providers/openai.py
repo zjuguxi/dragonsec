@@ -44,7 +44,7 @@ class OpenAIProvider(AIProvider):
             
             try:
                 result = response.choices[0].message.content
-                return self._parse_response(result)
+                return await self._parse_response(result)
             except (KeyError, IndexError, json.JSONDecodeError) as e:
                 logger.error(f"Failed to parse OpenAI response: {e}")
                 return self._get_default_response()
@@ -168,7 +168,7 @@ class OpenAIProvider(AIProvider):
         return relevant[:max_imports]
 
     def _get_default_response(self) -> Dict:
-        """Return default response"""
+        """Get default response when analysis fails"""
         return {
             "vulnerabilities": [],
             "overall_score": 0,
@@ -257,24 +257,22 @@ class OpenAIProvider(AIProvider):
         
         return prompt
 
-    def _parse_response(self, result: str) -> List[Dict]:
-        """Parse the response from OpenAI"""
-        # clean markdown code block markers
-        if result.startswith('```'):
-            result = result.split('\n', 1)[1]  # Remove first line
-        if result.endswith('```'):
-            result = result.rsplit('\n', 1)[0]  # Remove last line
-        if result.startswith('json'):
-            result = result.split('\n', 1)[1]  # Remove json marker
-            
-        result = result.strip()
-        
+    async def _parse_response(self, result: str) -> Dict:
+        """Parse response from OpenAI"""
         try:
-            return json.loads(result)
-        except json.JSONDecodeError as e:
-            logger.error(f"Error parsing JSON response: {e}")
-            logger.error(f"Raw response content: {result[:200]}...")
-            return []
+            parsed = json.loads(result)
+            if "vulnerabilities" not in parsed:
+                return self._get_default_response()
+            
+            # 确保所有漏洞都标记为 AI 来源
+            for vuln in parsed.get("vulnerabilities", []):
+                vuln["source"] = "ai"
+            
+            return parsed
+        
+        except Exception as e:
+            logger.error(f"Error parsing OpenAI response: {e}")
+            return self._get_default_response()
 
     async def _call_api(self, prompt: str) -> str:
         """Call OpenAI API"""

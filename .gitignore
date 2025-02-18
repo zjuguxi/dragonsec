@@ -86,8 +86,7 @@ wheels/
 # Virtual environments
 venv/
 env/
-.env/
-.venv/
+ENV/
 
 # IDE
 .idea/
@@ -103,3 +102,15 @@ htmlcov/
 .coverage
 .coverage.*
 coverage.xml
+
+# cProfile output files
+*.prof
+*.stats
+*.profile
+
+# Test coverage
+.pytest_cache/
+.tox/
+
+# Project specific
+.dragonsec/

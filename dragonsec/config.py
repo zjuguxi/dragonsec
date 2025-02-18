@@ -1,6 +1,7 @@
 """DragonSec configuration"""
 
 from pathlib import Path
+import os
 
 # 基础配置
 DEFAULT_CONFIG = {
@@ -30,4 +31,7 @@ DEFAULT_CONFIG = {
     # 日志配置
     'log_level': 'INFO',
     'log_format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-} 
+}
+
+# Add debug logging configuration
+LOG_LEVEL = os.getenv("DRAGONSEC_LOG_LEVEL", "INFO") 
