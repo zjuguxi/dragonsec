@@ -13,9 +13,6 @@ def test_secure_api_key():
     with pytest.raises(ValueError, match="API key is required"):
         TestProvider(api_key="")
         
-    with pytest.raises(ValueError, match="API key seems too short"):
-        TestProvider(api_key="short_key")
-        
-    # 测试有效的 API 密钥
-    provider = TestProvider("a" * 32)
-    assert provider._api_key == "a" * 32 
+    # 移除 API key 长度检查测试
+    provider = TestProvider(api_key="test_key")
+    assert provider._api_key == "test_key" 

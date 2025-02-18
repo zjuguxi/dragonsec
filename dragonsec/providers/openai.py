@@ -10,8 +10,13 @@ import logging
 logger = logging.getLogger(__name__)
 
 class OpenAIProvider(AIProvider):
-    def __init__(self, api_key: str):
-        self.client = AsyncOpenAI(api_key=api_key)
+    def __init__(self, api_key: str, base_url: str = None, model: str = "gpt-4"):
+        super().__init__(api_key=api_key)
+        self.client = AsyncOpenAI(
+            api_key=self._api_key,
+            base_url=base_url
+        ) if base_url else AsyncOpenAI(api_key=self._api_key)
+        self.model = model
         self.context_cache = {}
         self.SYSTEM_PROMPT = """
         You are a security expert. You MUST respond with valid JSON only, no markdown formatting or other text.
@@ -28,7 +33,7 @@ class OpenAIProvider(AIProvider):
                 raise ValueError("Invalid file path")
             
             response = await self.client.chat.completions.create(
-                model="gpt-4",
+                model=self.model,
                 messages=[
                     {"role": "system", "content": self.SYSTEM_PROMPT},
                     {"role": "user", "content": self._prepare_prompt(code, context)}
@@ -270,3 +275,45 @@ class OpenAIProvider(AIProvider):
             logger.error(f"Error parsing JSON response: {e}")
             logger.error(f"Raw response content: {result[:200]}...")
             return []
+
+    async def _call_api(self, prompt: str) -> str:
+        """Call OpenAI API"""
+        try:
+            completion = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are a security code analyzer..."},
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            return completion.choices[0].message.content
+        except Exception as e:
+            logger.error(f"API call failed: {e}")
+            raise
+
+    def _build_prompt(self, code: str, file_path: str, context: Dict = None) -> str:
+        """Build prompt for code analysis"""
+        return f"""
+Analyze the following code for security vulnerabilities:
+
+File: {file_path}
+
+{code}
+
+Context:
+{json.dumps(context or {}, indent=2)}
+
+Provide your analysis in the following JSON format:
+{{
+    "vulnerabilities": [
+        {{
+            "type": "vulnerability type",
+            "severity": severity_score (1-10),
+            "description": "detailed description",
+            "line_number": line_number,
+            "risk_analysis": "impact and risk description",
+            "recommendation": "how to fix"
+        }}
+    ]
+}}
+"""

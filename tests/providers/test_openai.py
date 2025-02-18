@@ -4,7 +4,10 @@ from unittest.mock import AsyncMock, patch
 
 @pytest.fixture
 def openai_provider():
-    return OpenAIProvider("test_key")
+    """Create a test instance of OpenAIProvider"""
+    with patch('dragonsec.providers.base.AIProvider._secure_api_key') as mock_secure:
+        mock_secure.return_value = "test_key_1234567890123456789012345678901"  # 32 字符
+        return OpenAIProvider("test_key_1234567890123456789012345678901")
 
 @pytest.mark.asyncio
 async def test_analyze_code_success(openai_provider):

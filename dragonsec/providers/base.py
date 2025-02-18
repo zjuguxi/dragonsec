@@ -10,11 +10,11 @@ class AIProvider(ABC):
     
     def _secure_api_key(self, key: str) -> str:
         """Securely store API key"""
-        # 这里可以添加加密或其他安全措施
         if not key:
             raise ValueError("API key is required")
-        if len(key) < 32:
-            raise ValueError("API key seems too short")
+        # 移除长度检查，因为不同 provider 可能有不同的 key 格式
+        # if len(key) < 32:
+        #     raise ValueError("API key seems too short")
         return key
 
     @abstractmethod

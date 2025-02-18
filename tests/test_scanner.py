@@ -144,24 +144,18 @@ async def test_scan_with_ai(mock_analyze, sample_file_path):
         "overall_score": 100
     }
     
-    # 创建一个非测试文件
-    test_file = Path(__file__).parent / "fixtures" / "regular_file.py"
-    test_file.write_text("""
-    def some_function():
-        return "Hello World"
-    """)
-    
-    try:
-        scanner = SecurityScanner(mode=ScanMode.OPENAI, api_key="test-key")
-        results = await scanner.scan_directory(str(test_file))
+    with patch('dragonsec.providers.base.AIProvider._secure_api_key') as mock_secure:
+        mock_secure.return_value = "test_key_1234567890123456789012345678901"
+        scanner = SecurityScanner(
+            mode=ScanMode.OPENAI, 
+            api_key="test_key_1234567890123456789012345678901"
+        )
+        results = await scanner.scan_directory(str(sample_file_path))
         
         assert isinstance(results, dict)
         assert "vulnerabilities" in results
         assert "summary" in results
         assert "overall_score" in results
-    finally:
-        # 清理测试文件
-        test_file.unlink(missing_ok=True)
 
 @pytest.mark.asyncio
 async def test_skip_test_files():

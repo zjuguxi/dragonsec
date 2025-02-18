@@ -4,7 +4,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 import asyncio
 from tqdm import tqdm
 import time
@@ -13,6 +13,9 @@ import hashlib
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
 import logging
+import cProfile
+import pstats
+from functools import wraps
 
 from ..providers.base import AIProvider
 from ..providers.openai import OpenAIProvider
@@ -20,6 +23,7 @@ from ..providers.gemini import GeminiProvider
 from dragonsec.utils.semgrep import SemgrepRunner
 from ..utils.file_utils import FileContext
 from ..utils.rule_manager import RuleManager
+from ..providers.deepseek import DeepseekProvider
 
 # 配置 logger
 logger = logging.getLogger(__name__)
@@ -28,6 +32,32 @@ class ScanMode(Enum):
     SEMGREP_ONLY = "semgrep"
     OPENAI = "openai"
     GEMINI = "gemini"
+    DEEPSEEK = "deepseek"  # 添加新的模式
+
+def profile_async(func):
+    """Profile async function"""
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        profiler = cProfile.Profile()
+        try:
+            return await profiler.runcall(func, *args, **kwargs)
+        finally:
+            stats = pstats.Stats(profiler)
+            stats.sort_stats('cumulative')
+            stats.print_stats(50)  # 显示前50个耗时最多的函数
+    return wrapper
+
+def time_async(func):
+    """Time async function execution"""
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        start = time.perf_counter()
+        try:
+            return await func(*args, **kwargs)
+        finally:
+            elapsed = time.perf_counter() - start
+            logger.info(f"{func.__name__} took {elapsed:.2f} seconds")
+    return wrapper
 
 class SecurityScanner:
     def __init__(self, mode: ScanMode = ScanMode.SEMGREP_ONLY, api_key: str = None, 
@@ -69,7 +99,8 @@ class SecurityScanner:
     def _create_provider(self, mode: ScanMode, api_key: str) -> AIProvider:
         providers = {
             ScanMode.OPENAI: OpenAIProvider,
-            ScanMode.GEMINI: GeminiProvider
+            ScanMode.GEMINI: GeminiProvider,
+            ScanMode.DEEPSEEK: DeepseekProvider  # 添加新的 provider
         }
         return providers[mode](api_key)
 
@@ -125,9 +156,15 @@ class SecurityScanner:
         
         return False
 
+    @time_async
     async def scan_file(self, file_path: str) -> Dict:
         """Scan a single file"""
         try:
+            logger.info(f"Starting scan of file: {file_path}")
+            
+            # 获取相对路径
+            rel_path = str(Path(file_path).relative_to(Path.cwd()))
+            
             # 获取文件上下文
             context = self.file_context.get_context(file_path)
             
@@ -137,11 +174,13 @@ class SecurityScanner:
             
             # 只在 SEMGREP_ONLY 模式或者 incremental 模式下运行 semgrep
             if self.mode == ScanMode.SEMGREP_ONLY:
+                logger.info("Running semgrep scan")
                 semgrep_results = await self.semgrep_runner.run_scan(file_path)
                 semgrep_results = self.semgrep_runner.format_results(semgrep_results)
             
             # 只在 AI 模式下运行 AI 分析
             if self.mode != ScanMode.SEMGREP_ONLY and self.ai_provider:
+                logger.info("Running AI analysis")
                 with open(file_path, 'r', encoding='utf-8') as f:
                     code = f.read()
                 ai_results = await self.ai_provider.analyze_code(
@@ -149,166 +188,195 @@ class SecurityScanner:
                     file_path=file_path,
                     context=context
                 )
+                logger.info(f"AI analysis completed with {len(ai_results.get('vulnerabilities', []))} findings")
             
             # 合并结果
-            if self.mode == ScanMode.SEMGREP_ONLY:
-                return {"vulnerabilities": semgrep_results}
-            else:
-                return ai_results
+            result = {"vulnerabilities": semgrep_results} if self.mode == ScanMode.SEMGREP_ONLY else ai_results
+            for vuln in result.get("vulnerabilities", []):
+                if "file" not in vuln or not vuln["file"]:
+                    vuln["file"] = rel_path
+            
+            logger.info(f"Scan completed for {file_path}")
+            return result
             
         except Exception as e:
             logger.error(f"Error scanning file {file_path}: {e}")
             return {"vulnerabilities": []}
 
     async def process_batch(self, files: List[str]) -> List[Dict]:
-        """Process a batch of files in parallel"""
-        tasks = [self.scan_file(f) for f in files]
-        return await asyncio.gather(*tasks)
+        """Process a batch of files"""
+        if not self.ai_provider:
+            return await asyncio.gather(*[self.scan_file(f) for f in files])
 
-    async def scan_directory(self, path: str) -> Dict:
-        """Scan a directory recursively"""
-        if not os.path.exists(path):
-            raise FileNotFoundError(f"Directory {path} does not exist")
-        
-        # 设置扫描根目录环境变量
-        os.environ['DRAGONSEC_SCAN_ROOT'] = str(Path(path).resolve())
-        
-        # 添加开始时间
-        start_time = time.time()
-        
-        print("\n📂 Collecting files to scan...")
-        
-        # 添加跳过文件计数
-        skipped_files = 0
-        files_to_scan = []
-        for root, dirs, files in os.walk(path):
-            # 跳过指定目录
-            dirs[:] = [d for d in dirs if d not in self.skip_dirs]
-            
-            # 跳过测试目录
-            if not self.include_tests and self._should_skip_path(root, is_dir=True):
-                if self.verbose:
-                    print(f"Skipping test directory: {root}")
+        # 准备批处理数据
+        file_contents = []
+        for file_path in files:
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    code = f.read()
+                    file_contents.append((code, file_path))
+            except Exception as e:
+                logger.error(f"Error reading file {file_path}: {e}")
                 continue
-            
-            if self.verbose:
-                print(f"Walking directory: {root}")
-                print(f"  Subdirectories after filtering: {dirs}")
-                print(f"  Files: {files}")
-            
-            for file in files:
-                file_path = os.path.join(root, file)
-                abs_path = os.path.abspath(file_path)
-                
-                if self._should_skip_file(abs_path):
-                    skipped_files += 1  # 增加计数
-                    if self.verbose:
-                        print(f"Skipping file: {file_path}")
-                    continue
-                
-                if self.verbose:
-                    print(f"\nProcessing file: {file_path}")
-                    print(f"  Absolute path: {abs_path}")
-                    print(f"  Exists: {os.path.exists(abs_path)}")
-                    print(f"  Is file: {os.path.isfile(abs_path)}")
-                    print(f"  Readable: {os.access(abs_path, os.R_OK)}")
-                
-                if self.verbose:
-                    print(f"Checking file: {file_path}")
-                    print(f"  name: {Path(file_path).name}")
-                    print(f"  ext: {Path(file_path).suffix}")
-                    print(f"  supported_ext: {Path(file_path).suffix.lower() in {'.py', '.js', '.ts', '.java', '.go', '.php'}}")
-                    print(f"  is_dockerfile: {'dockerfile' in Path(file_path).name.lower()}")
 
-                # 检查是否是 Dockerfile 或支持的扩展名
-                if not (Path(file_path).suffix.lower() in {'.py', '.js', '.ts', '.java', '.go', '.php'} or 'dockerfile' in Path(file_path).name.lower()):
-                    if self.verbose:
-                        print(f"  Skipping unsupported file: {file_path}")
-                    continue
+        # 使用 AI provider 的批处理功能
+        if hasattr(self.ai_provider, 'analyze_batch'):
+            results = await self.ai_provider.analyze_batch(file_contents)
+        else:
+            results = await asyncio.gather(*[
+                self.scan_file(f) for f in files
+            ], return_exceptions=True)
+
+        return [r for r in results if not isinstance(r, Exception)]
+
+    @profile_async
+    async def scan_directory(self, directory: str) -> Dict:
+        """Scan a directory for security issues"""
+        try:
+            start_time = time.perf_counter()
+            logger.info(f"Scanning directory: {directory}")
+            
+            # 收集要扫描的文件，并获取跳过的文件数
+            files_to_scan, skipped_count = self._collect_files(directory)
+            total_files = len(files_to_scan)
+            
+            if not files_to_scan:
+                logger.info("No files to scan")
+                return {
+                    "vulnerabilities": [],
+                    "overall_score": 100,
+                    "summary": "No files to scan",
+                    "metadata": {
+                        "files_scanned": 0,
+                        "skipped_files": skipped_count,  # 使用实际跳过的文件数
+                        "scan_duration": 0,
+                        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "mode": self.mode.value
+                    }
+                }
+            
+            logger.info(f"\n🔍 Found {total_files} files to scan")
+            
+            # 创建进度条
+            progress = tqdm(
+                total=total_files,
+                desc="Scanning files",
+                unit="file"
+            )
+            
+            all_results = []
+            try:
+                # 按批次处理文件
+                for i in range(0, len(files_to_scan), self.batch_size):
+                    batch = files_to_scan[i:i + self.batch_size]
+                    batch_results = await self.process_batch(batch)
                     
-                # 跳过测试文件
-                if not self.include_tests and self._should_skip_path(file_path, is_dir=False):
-                    if self.verbose:
-                        print(f"Skipping test file: {file_path}")
-                    continue
-                
-                if self.verbose:
-                    print(f"  Added file to scan: {file_path}")
-                files_to_scan.append(file_path)
-        
-        # 增量扫描
-        if self.incremental:
-            changed_files = self._get_changed_files(files_to_scan)
-            if changed_files is not None:
-                files_to_scan = changed_files
-        
-        print(f"\n🔍 Found {len(files_to_scan)} files to scan")
-        
-        if not files_to_scan:
+                    # 更新进度和统计
+                    progress.update(len(batch))
+                    all_results.extend(batch_results)
+                    
+                    # 批次间延迟
+                    if i + self.batch_size < len(files_to_scan):
+                        await asyncio.sleep(self.batch_delay)
+            finally:
+                progress.close()
+            
+            # 计算扫描时间
+            scan_duration = time.perf_counter() - start_time
+            
+            # 合并结果
+            vulnerabilities = []
+            for result in all_results:
+                if result and "vulnerabilities" in result:
+                    vulnerabilities.extend(result["vulnerabilities"])
+            
+            # 计算安全分数
+            score = self._calculate_security_score(vulnerabilities)
+            
+            # 统计有问题的文件数
+            files_with_issues = len(set(
+                vuln["file"] for vuln in vulnerabilities 
+                if "file" in vuln
+            ))
+            
+            # 统计 AI 和 semgrep 发现的漏洞数量
+            ai_findings = len([v for v in vulnerabilities if v.get("source") == "ai"])
+            semgrep_findings = len([v for v in vulnerabilities if v.get("source") == "semgrep"])
+            
             return {
-                "vulnerabilities": [],
-                "overall_score": 100,
-                "summary": "No files to scan",
+                "vulnerabilities": vulnerabilities,
+                "overall_score": score,
+                "summary": (f"Found {len(vulnerabilities)} vulnerabilities "
+                           f"({semgrep_findings} from semgrep, {ai_findings} from AI analysis). "
+                           f"Security Score: {score}%. "
+                           f"Scan completed in {scan_duration:.2f} seconds."),
                 "metadata": {
-                    "files_scanned": 0,
-                    "skipped_files": skipped_files,
-                    "scan_time": 0
+                    "scan_duration": scan_duration,
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "mode": self.mode.value,
+                    "files_scanned": total_files,
+                    "skipped_files": skipped_count,  # 使用实际跳过的文件数
+                    "files_with_issues": files_with_issues,
+                    "semgrep_findings": semgrep_findings,
+                    "ai_findings": ai_findings
                 }
             }
+            
+        except Exception as e:
+            logger.error(f"Error scanning directory: {e}")
+            return self._get_error_result()
 
-        # Process files in batches
-        all_vulnerabilities = []  # Use a list to store all vulnerabilities
-        semgrep_count = 0
-        ai_count = 0
+    async def _scan_file_with_progress(self, file_path: str, semaphore: asyncio.Semaphore, 
+                                     progress: tqdm) -> Dict:
+        """Scan a single file and update progress"""
+        try:
+            async with semaphore:
+                result = await self.scan_file(file_path)
+                progress.update(1)  # 更新进度
+                progress.refresh()  # 强制刷新显示
+                return result
+        except Exception as e:
+            logger.error(f"Error scanning file {file_path}: {e}")
+            progress.update(1)  # 即使出错也更新进度
+            progress.refresh()
+            return {"vulnerabilities": []}
+
+    def _collect_files(self, directory: str) -> Tuple[List[str], int]:
+        """Collect files to scan and return tuple of (files_to_scan, skipped_count)"""
+        files_to_scan = []
+        skipped_count = 0
         
-        with tqdm(total=len(files_to_scan), desc="Scanning files") as pbar:
-            for i in range(0, len(files_to_scan), self.batch_size):
-                batch = files_to_scan[i:i + self.batch_size]
-                batch_results = await self.process_batch(batch)
+        try:
+            for root, dirs, files in os.walk(directory):
+                # 跳过要忽略的目录
+                dirs[:] = [d for d in dirs if d not in self.skip_dirs]
                 
-                # Merge results from each file
-                for result in batch_results:
-                    if "vulnerabilities" in result:
-                        vulns = result["vulnerabilities"]
-                        all_vulnerabilities.extend(vulns)
-                        # Count sources
-                        semgrep_count += sum(1 for v in vulns if v.get("source") == "semgrep")
-                        ai_count += sum(1 for v in vulns if v.get("source") == "ai")
-                
-                pbar.update(len(batch))
-                await asyncio.sleep(self.batch_delay)
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    
+                    # 检查文件是否应该跳过
+                    if self._should_skip_file(file_path):
+                        skipped_count += 1
+                        logger.debug(f"Skipping file: {file_path}")
+                        continue
+                    
+                    files_to_scan.append(file_path)
+                    
+            logger.debug(f"Found {len(files_to_scan)} files to scan, skipped {skipped_count} files")
+            return files_to_scan, skipped_count
+            
+        except Exception as e:
+            logger.error(f"Error collecting files: {e}")
+            return [], 0
 
-        # 计算扫描时间
-        elapsed_time = time.time() - start_time
-        
-        # Calculate overall security score
-        score = 100
-        if self.ai_provider and all_vulnerabilities:
-            score = self.ai_provider._calculate_security_score(all_vulnerabilities)
-        elif all_vulnerabilities:
-            score = 50  # If only semgrep results, give a medium score
-        
-        return {
-            "vulnerabilities": all_vulnerabilities,
-            "overall_score": score,
-            "summary": (f"Found {len(all_vulnerabilities)} vulnerabilities "
-                       f"({semgrep_count} from semgrep, {ai_count} from AI analysis). "
-                       f"Security Score: {score}%. "
-                       f"Scan completed in {elapsed_time:.2f} seconds."),
-            "metadata": {
-                "scan_time": elapsed_time,
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "mode": self.mode.value,
-                "files_scanned": len(files_to_scan),
-                "skipped_files": skipped_files,
-                "files_with_issues": len(set(v.get("file", "") for v in all_vulnerabilities))
-            }
-        }
-
-    async def run_in_process(self, executor, func, *args):
-        """Run a function in a separate process"""
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(executor, func, *args)
+    def _calculate_security_score(self, vulnerabilities: List[Dict]) -> float:
+        """Calculate security score based on vulnerabilities"""
+        if self.ai_provider and vulnerabilities:
+            return self.ai_provider._calculate_security_score(vulnerabilities)
+        elif vulnerabilities:
+            return 50  # If only semgrep results, give a medium score
+        else:
+            return 100  # No vulnerabilities found
 
     def _get_changed_files(self, files: List[str]) -> List[str]:
         """Get files changed since last scan"""
@@ -349,6 +417,19 @@ class SecurityScanner:
         except Exception as e:
             print(f"Warning: Failed to check changed files: {e}")
             return files
+
+    def _get_error_result(self) -> Dict:
+        """Get error result"""
+        return {
+            "vulnerabilities": [],
+            "overall_score": 100,
+            "summary": "Error scanning directory",
+            "metadata": {
+                "files_scanned": 0,
+                "skipped_files": 0,
+                "scan_duration": 0
+            }
+        }
 
 async def _async_main():
     parser = argparse.ArgumentParser(description="Security scanner with multiple scanning modes")
