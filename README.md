@@ -8,66 +8,79 @@
 
 <!-- END BADGIE TIME -->
 
-DragonSec is a tool that combines Semgrep's static analysis with AI-powered code review to identify security vulnerabilities in your code.
+DragonSec is an advanced security scanner that combines traditional static analysis with AI-powered code review.
 
 ## Features
-- Intelligent rule selection based on file types:
-  - Language-specific rules (Python, JavaScript, Go, Java)
-  - OWASP Top 10 checks
-  - Secrets Detection
-  - Container Security (Docker, Kubernetes)
-- AI-powered analysis:
-  - OpenAI GPT-4 integration
-  - Google Gemini Pro support
-  - Context-aware code review
-- Performance optimizations:
-  - Parallel file processing
-  - Result caching
-  - Smart rule selection
 
-## Prerequisites
+- **Multiple AI Models Support**:
+  - OpenAI GPT-4o
+  - Google Gemini Pro
+  - Deepseek R1 (Aliyun)
+  - More models coming soon...
 
-1. Install the package:
+- **Static Analysis**:
+  - Integrated with Semgrep for reliable static code analysis
+  - Custom security rules and patterns
+  - Support for multiple programming languages
+
+- **Hybrid Analysis**:
+  - Combines AI insights with static analysis results
+  - Reduces false positives through cross-validation
+  - Provides comprehensive security scoring
+
+## Installation
+
 ```bash
-pip install -e .
+pip install dragonsec
 ```
 
-2. Install Semgrep:
+## Quick Start
+
+1. Set up your API keys:
 ```bash
-pip install semgrep
+export OPENAI_API_KEY="your-openai-key"  # For GPT-4
+export GEMINI_API_KEY="your-gemini-key"  # For Gemini
+export DEEPSEEK_API_KEY="your-deepseek-key"  # For Deepseek
 ```
 
-## Usage
-
-1. Basic security scan (using Semgrep only):
+2. Run a scan:
 ```bash
-dragonsec scan --path <path_to_your_project> --mode semgrep
-```
-
-2. AI-enhanced scan:
-```bash
-# Using OpenAI
-dragonsec scan --path <path_to_your_project> --mode openai --api-key <your_openai_api_key>
+# Using OpenAI GPT-4
+dragonsec scan --path /path/to/code --mode openai --api-key $OPENAI_API_KEY
 
 # Using Google Gemini
-dragonsec scan --path <path_to_your_project> --mode gemini --api-key <your_gemini_api_key>
+dragonsec scan --path /path/to/code --mode gemini --api-key $GEMINI_API_KEY
+
+# Using Deepseek Code-1
+dragonsec scan --path /path/to/code --mode deepseek --api-key $DEEPSEEK_API_KEY
+
+# Using only Semgrep (no API key needed)
+dragonsec scan --path /path/to/code --mode semgrep
 ```
 
-3. View available security rules:
-```bash
-dragonsec rules --list
-```
+## Configuration
 
-4. Additional options:
-```bash
-# Include test files in scan
-dragonsec scan --path <path> --include-tests
+- `--batch-size`: Number of files to process in parallel (default: 4)
+- `--batch-delay`: Delay between batches in seconds (default: 0.1)
+- `--include-tests`: Include test files in scan (default: False)
+- `--verbose`: Show detailed progress information
+- `--output-dir`: Custom directory for scan results (default: ~/.dragonsec/scan_results)
 
-# Adjust parallel processing
-dragonsec scan --path <path> --workers 4
+## Supported Languages
 
-# Enable verbose output
-dragonsec scan --path <path> --verbose
-```
+- Python
+- JavaScript
+- Java
+- Go
+- PHP
+- Dockerfile
 
-Scan results are saved in `~/.dragonsec/scan_results` by default.
+## Output
+
+Results are saved in JSON format with:
+- Detailed vulnerability descriptions
+- Severity ratings
+- Line numbers
+- Risk analysis
+- Remediation recommendations
+- Overall security score
