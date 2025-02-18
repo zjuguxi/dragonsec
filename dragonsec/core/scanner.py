@@ -16,6 +16,7 @@ import logging
 import cProfile
 import pstats
 from functools import wraps
+from datetime import datetime
 
 from ..providers.base import AIProvider
 from ..providers.openai import OpenAIProvider
@@ -83,8 +84,21 @@ class SecurityScanner:
         
         # 支持的文件类型
         self.supported_extensions = {
-            'py', 'js', 'java',  # 不带点号
-            '.py', '.js', '.java'  # 带点号
+            'py', '.py',      # Python
+            'js', '.js',      # JavaScript
+            'java', '.java',  # Java
+            'go', '.go',      # Go
+            'php', '.php',    # PHP
+            'ts', '.ts',      # TypeScript
+            'jsx', '.jsx',    # React
+            'tsx', '.tsx',    # React + TypeScript
+            'vue', '.vue',    # Vue
+            'rb', '.rb',      # Ruby
+            'rs', '.rs',      # Rust
+            'c', '.c',        # C
+            'cpp', '.cpp',    # C++
+            'cs', '.cs',      # C#
+            'swift', '.swift' # Swift
         }
         
         # 启用调试日志
@@ -102,53 +116,51 @@ class SecurityScanner:
         }
         return providers[mode](api_key)
 
-    def _should_skip_file(self, file_path: str) -> bool:
-        """检查是否应该跳过文件"""
-        path = Path(file_path)
-        
-        # 空文件检查
-        if path.stat().st_size == 0:
-            logger.debug(f"Skipping empty file: {file_path}")
-            return True
+    def _should_scan_file(self, file_path: str) -> bool:
+        """检查是否应该扫描该文件"""
+        try:
+            # 获取文件扩展名（带点和不带点的形式）
+            ext_with_dot = os.path.splitext(file_path)[1].lower()
+            ext_no_dot = ext_with_dot[1:] if ext_with_dot.startswith('.') else ext_with_dot
             
-        # 扩展名检查
-        file_ext = path.suffix.lower()  # 保留点号
-        file_ext_no_dot = file_ext.lstrip('.')  # 不带点号
-        is_dockerfile = 'dockerfile' in path.name.lower()
-        
-        # 详细的调试信息
-        logger.debug(f"Checking file: {file_path}")
-        logger.debug(f"File extension (with dot): {file_ext}")
-        logger.debug(f"File extension (no dot): {file_ext_no_dot}")
-        logger.debug(f"Is Dockerfile: {is_dockerfile}")
-        logger.debug(f"Supported extensions: {self.supported_extensions}")
-        
-        # 分开检查每个条件
-        should_scan = (
-            file_ext in self.supported_extensions or
-            file_ext_no_dot in self.supported_extensions or
-            is_dockerfile
-        )
-        
-        if not should_scan:
-            logger.debug(f"Skipping unsupported file type: {file_path}")
-            return True
+            # 检查是否为 Dockerfile
+            is_dockerfile = os.path.basename(file_path).lower() == 'dockerfile'
             
-        # 测试文件检查
-        if not self.include_tests:
-            # 检查是否在测试目录中，但排除 fixtures 目录
-            path_parts = [p.lower() for p in path.parts]
-            if 'tests' in path_parts and 'fixtures' not in path_parts:
-                logger.debug(f"Skipping test directory: {file_path}")
-                return True
+            logger.debug(f"Checking file: {file_path}")
+            logger.debug(f"File extension (with dot): {ext_with_dot}")
+            logger.debug(f"File extension (no dot): {ext_no_dot}")
+            logger.debug(f"Is Dockerfile: {is_dockerfile}")
+            logger.debug(f"Supported extensions: {self.supported_extensions}")
             
-            # 检查文件名是否包含测试模式
-            if any(pattern in path.name.lower() for pattern in self.test_file_patterns):
-                logger.debug(f"Skipping test file: {file_path}")
-                return True
-        
-        logger.debug(f"File will be scanned: {file_path}")
-        return False
+            # 如果是支持的文件类型或是 Dockerfile
+            if ext_with_dot in self.supported_extensions or \
+               ext_no_dot in self.supported_extensions or \
+               is_dockerfile:
+                
+                # 检查文件大小
+                if os.path.getsize(file_path) > 1024 * 1024:  # 1MB
+                    logger.debug(f"Skipping large file: {file_path}")
+                    return False
+                
+                # 检查是否为空文件
+                if os.path.getsize(file_path) == 0:
+                    logger.debug(f"Skipping empty file: {file_path}")
+                    return False
+                
+                # 检查是否为二进制文件
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        f.read(1024)  # 只读取前1KB来检查
+                    return True
+                except UnicodeDecodeError:
+                    logger.debug(f"Skipping binary file: {file_path}")
+                    return False
+                
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error checking file {file_path}: {e}")
+            return False
 
     async def scan_file(self, file_path: str) -> Dict:
         """Scan a single file"""
@@ -212,30 +224,51 @@ class SecurityScanner:
 
         return [r for r in results if not isinstance(r, Exception)]
 
-    async def scan_directory(self, directory: str) -> Dict:
-        """Scan a directory for security issues"""
+    async def scan_directory(self, directory: str, mode: str = "openai") -> Dict:
+        """扫描指定目录下的所有文件"""
         try:
-            logger.info(f"Scanning directory: {directory}")
-            start_time = time.perf_counter()
+            # 展开路径并获取绝对路径
+            directory = os.path.expanduser(directory)
+            directory = os.path.abspath(directory)
             
-            # 收集要扫描的文件
-            files_to_scan, skipped_count = self._collect_files(directory)
+            # 设置扫描根目录
+            self.file_context.set_scan_root(directory)
+            
+            logger.info(f"Scanning directory: {directory}")
+            
+            # 获取所有支持的文件
+            files_to_scan = []
+            skipped_files = 0
+            
+            for root, _, files in os.walk(directory):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    if self._should_scan_file(file_path):
+                        files_to_scan.append(file_path)
+                    else:
+                        skipped_files += 1
+            
+            logger.info(f"Found {len(files_to_scan)} files to scan, skipped {skipped_files} files")
+            
             if not files_to_scan:
-                logger.warning("No files found to scan")
+                # 如果没有文件要扫描，返回空结果而不是 None
                 return {
                     "vulnerabilities": [],
                     "overall_score": 100,
                     "summary": "No files to scan",
                     "metadata": {
+                        "scan_duration": 0,
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "mode": mode,
                         "files_scanned": 0,
-                        "skipped_files": skipped_count,
-                        "scan_duration": time.perf_counter() - start_time,
-                        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                        "mode": self.mode.value
+                        "skipped_files": skipped_files,
+                        "files_with_issues": 0,
+                        "semgrep_findings": 0,
+                        "ai_findings": 0
                     }
                 }
             
-            logger.info(f"\n🔍 Found {len(files_to_scan)} files to scan")
+            start_time = time.perf_counter()
             
             # 扫描所有文件
             results = []
@@ -251,7 +284,7 @@ class SecurityScanner:
                         await asyncio.sleep(self.batch_delay)
             
             # 如果是 AI 模式，发送所有结果给 AI 去重
-            if self.mode != ScanMode.SEMGREP_ONLY:
+            if mode != ScanMode.SEMGREP_ONLY:
                 all_vulns = []
                 for result in results:
                     all_vulns.extend(result.get("vulnerabilities", []))
@@ -271,9 +304,9 @@ class SecurityScanner:
             summary["metadata"] = {
                 "scan_duration": scan_duration,
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "mode": self.mode.value,
+                "mode": mode,
                 "files_scanned": len(files_to_scan),
-                "skipped_files": skipped_count,
+                "skipped_files": skipped_files,
                 "files_with_issues": len([r for r in results if r.get("vulnerabilities")]),
                 "semgrep_findings": len([v for r in results for v in r.get("vulnerabilities", []) 
                                        if v.get("source") == "semgrep"]),
@@ -281,45 +314,48 @@ class SecurityScanner:
                                   if v.get("source") == "ai"])
             }
             
+            # Create output directory
+            output_dir = Path(os.path.expanduser("~/.dragonsec/scan_results"))
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Generate report filename
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            target_name = Path(directory).name
+            report_file = output_dir / f"{timestamp}_{target_name}_{mode}_scan.json"
+            
+            # Save report
+            with open(report_file, 'w', encoding='utf-8') as f:
+                json.dump(summary, f, indent=2, ensure_ascii=False)
+            
+            # Print results
+            print("\n" + "="*80)
+            print(summary["summary"])
+            print(f"📝 Detailed report saved to: {report_file}")
+            print("="*80 + "\n")
+            
+            if self.verbose:
+                print("\n🔍 Detailed scan results:")
+                print(json.dumps(summary, indent=2, ensure_ascii=False))
+            
             return summary
             
         except Exception as e:
             logger.error(f"Error scanning directory: {e}")
-            return self._get_error_result()
-
-    def _collect_files(self, directory: str) -> Tuple[List[str], int]:
-        """Collect files to scan and return tuple of (files_to_scan, skipped_count)"""
-        files_to_scan = []
-        skipped_count = 0
-        
-        try:
-            for root, dirs, files in os.walk(directory):
-                # 跳过要忽略的目录
-                dirs[:] = [d for d in dirs if d not in self.skip_dirs]
-                
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    
-                    # 添加调试日志
-                    logger.debug(f"Checking file: {file_path}")
-                    logger.debug(f"File extension: {Path(file_path).suffix.lstrip('.')}")
-                    logger.debug(f"Supported extensions: {self.supported_extensions}")
-                    
-                    # 检查文件是否应该跳过
-                    if self._should_skip_file(file_path):
-                        skipped_count += 1
-                        logger.debug(f"Skipping file: {file_path}")
-                        continue
-                    
-                    logger.debug(f"Adding file to scan: {file_path}")
-                    files_to_scan.append(file_path)
-            
-            logger.info(f"Found {len(files_to_scan)} files to scan, skipped {skipped_count} files")
-            return files_to_scan, skipped_count
-            
-        except Exception as e:
-            logger.error(f"Error collecting files: {e}")
-            return [], 0
+            # 出错时也返回有效的字典而不是 None
+            return {
+                "vulnerabilities": [],
+                "overall_score": 0,
+                "summary": f"Error during scan: {e}",
+                "metadata": {
+                    "scan_duration": 0,
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "mode": mode,
+                    "files_scanned": 0,
+                    "skipped_files": 0,
+                    "files_with_issues": 0,
+                    "error": str(e)
+                }
+            }
 
     def _calculate_security_score(self, vulnerabilities: List[Dict]) -> float:
         """Calculate security score based on vulnerabilities"""
@@ -438,30 +474,7 @@ async def _async_main():
         
         try:
             # Run scan
-            results = await scanner.scan_directory(args.path)
-            
-            # Create output directory
-            output_dir = Path(args.output_dir)
-            output_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Generate report filename
-            timestamp = time.strftime("%Y%m%d_%H%M%S")
-            target_name = Path(args.path).name
-            report_file = output_dir / f"{timestamp}_{target_name}_{mode.value}_scan.json"
-            
-            # Save report
-            with open(report_file, 'w', encoding='utf-8') as f:
-                json.dump(results, f, indent=2, ensure_ascii=False)
-            
-            # Print results
-            print("\n" + "="*80)
-            print(results["summary"])
-            print(f"📝 Detailed report saved to: {report_file}")
-            print("="*80 + "\n")
-            
-            if args.verbose:
-                print("\n🔍 Detailed scan results:")
-                print(json.dumps(results, indent=2, ensure_ascii=False))
+            await scanner.scan_directory(args.path, args.mode)
             
         except Exception as e:
             print(f"❌ Error during scan: {e}")

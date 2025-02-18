@@ -14,12 +14,23 @@ import threading
 logger = logging.getLogger(__name__)
 
 class GeminiProvider(AIProvider):
+    """Gemini AI provider for code analysis"""
+    
     def __init__(self, api_key: str, max_retries: int = 2):
-        super().__init__(api_key=api_key)
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel('gemini-pro')
+        super().__init__(api_key)
+        self.model = "gemini-pro"
+        self.client = genai.GenerativeModel(self.model)
         self.context_cache = {}
         self.max_retries = max_retries
+
+    @property
+    def system_prompt(self) -> str:
+        """Get Gemini-specific system prompt"""
+        return self.base_system_prompt + """
+        Additional Gemini-specific instructions:
+        - Be precise and concise
+        - Focus on actionable findings
+        """
 
     async def analyze_code(self, code: str, file_path: str, context: Dict = None) -> Dict:
         """Analyze code using Google's Gemini API"""
@@ -34,7 +45,7 @@ class GeminiProvider(AIProvider):
                 prompt = self._build_prompt(code, file_path, context)
                 
                 # 直接使用异步 API
-                response = await self.model.generate_content_async(prompt)
+                response = await self.client.generate_content(prompt)
                 
                 # 处理响应
                 if not response:
@@ -310,4 +321,24 @@ class GeminiProvider(AIProvider):
             return response
         except Exception as e:
             logger.error(f"Error parsing response: {e}")
+            return self._get_default_response()
+
+    async def _analyze_with_ai(self, code: str, file_path: str, context: Dict = None) -> Dict:
+        """Gemini-specific implementation"""
+        try:
+            response = await self.client.generate_content(
+                self.system_prompt + f"\n\nAnalyze this code:\n\n{code}"
+            )
+            
+            content = response.text
+            logger.debug(f"Raw response content: {content}")
+            
+            try:
+                return json.loads(content)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse response as JSON: {e}")
+                return self._get_default_response()
+                
+        except Exception as e:
+            logger.error(f"Error calling Gemini API: {e}")
             return self._get_default_response() 

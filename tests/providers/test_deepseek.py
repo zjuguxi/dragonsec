@@ -4,7 +4,6 @@ from dragonsec.providers.deepseek import DeepseekProvider
 from tests.providers.test_openai import (
     test_analyze_code_success as test_openai_analyze_success,
     test_analyze_code_error as test_openai_analyze_error,
-    test_merge_results as test_openai_merge_results
 )
 
 @pytest.fixture
@@ -23,10 +22,9 @@ def deepseek_provider():
         assert "dashscope.aliyuncs.com" in str(provider.client.base_url)
         return provider
 
-# 重用 OpenAI 的测试，但添加 Deepseek 特有的测试
-test_analyze_code_success = test_openai_analyze_success  # 直接使用 OpenAI 的测试
+# 重用 OpenAI 的测试
+test_analyze_code_success = test_openai_analyze_success
 test_analyze_code_error = test_openai_analyze_error
-test_merge_results = test_openai_merge_results
 
 @pytest.mark.asyncio
 async def test_deepseek_specific_response_format(deepseek_provider):

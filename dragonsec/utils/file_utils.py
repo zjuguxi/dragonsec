@@ -11,10 +11,17 @@ logger = logging.getLogger(__name__)
 class FileContext:
     def __init__(self):
         self.root_indicators = {'.git', 'package.json', 'setup.py', 'pom.xml', 'build.gradle'}
+        self._scan_root = None  # 添加实例变量
+
+    def set_scan_root(self, path: str) -> None:
+        """设置扫描根目录"""
+        self._scan_root = os.path.abspath(os.path.expanduser(path))
 
     def _get_scan_root(self) -> Path:
         """获取扫描根目录"""
-        return Path(os.getenv('DRAGONSEC_SCAN_ROOT', Path.cwd())).resolve()
+        if self._scan_root is None:
+            return Path(os.getenv('DRAGONSEC_SCAN_ROOT', Path.cwd())).resolve()
+        return Path(self._scan_root).resolve()
 
     def get_context(self, file_path: str) -> Dict:
         """Get context information for a file"""
@@ -28,7 +35,7 @@ class FileContext:
             # 使用扫描根目录
             scan_root = self._get_scan_root()
             if not str(path).startswith(str(scan_root)):
-                logger.warning(f"File outside scan root: {file_path}")
+                logger.debug(f"File outside scan root: {file_path}")  # 改为 debug 级别
             
             with open(path, 'r', encoding='utf-8') as f:
                 content = f.read()
@@ -174,4 +181,17 @@ class FileContext:
                 chunk = f.read(1024)
                 return not bool(b'\x00' in chunk)  # 简单的二进制检测
         except Exception:
+            return False
+
+    def is_file_in_scan_root(self, file_path: str, scan_root: str) -> bool:
+        """检查文件是否在扫描根目录内"""
+        try:
+            # 规范化路径
+            file_path = os.path.abspath(file_path)
+            scan_root = os.path.abspath(scan_root)
+            
+            # 检查文件路径是否以扫描根目录开头
+            return file_path.startswith(scan_root)
+        except Exception as e:
+            logger.error(f"Error checking file path: {e}")
             return False

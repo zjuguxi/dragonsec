@@ -1,248 +1,140 @@
 """Grok AI provider for code analysis"""
 
 import logging
-from .openai import OpenAIProvider
-from pathlib import Path
 from typing import Dict, List
 import json
+from openai import AsyncOpenAI
+from .base import AIProvider  # 从 base 导入
 
 logger = logging.getLogger(__name__)
 
-class GrokProvider(OpenAIProvider):
+class GrokProvider(AIProvider):
     """Grok AI provider for code analysis"""
     
     def __init__(self, api_key: str):
-        super().__init__(
+        super().__init__(api_key)
+        self.client = AsyncOpenAI(
             api_key=api_key,
-            base_url="https://api.x.ai/v1",
-            model="grok-2-latest"
+            base_url="https://api.x.ai/v1"
         )
+        self.model = "grok-2-latest"
 
-    async def _call_api(self, prompt: str) -> str:
-        """Call Grok API using OpenAI client"""
-        try:
-            completion = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "You are a security code analyzer..."},
-                    {"role": "user", "content": prompt}
-                ]
-            )
-            return completion.choices[0].message.content
-            
-        except Exception as e:
-            logger.error(f"Grok API call failed: {e}")
-            raise
+    @property
+    def system_prompt(self) -> str:
+        """Get Grok-specific system prompt"""
+        # 如果需要添加 Grok 特定的指令
+        return self.base_system_prompt + """
+        Additional Grok-specific instructions:
+        - Use JSON response format
+        - Be concise in descriptions
+        """
 
-    def _get_default_response(self) -> Dict:
-        """Get default response when analysis fails"""
-        return {
-            "vulnerabilities": [],
-            "overall_score": 100,  # 没有发现漏洞时返回满分
-            "summary": "Failed to analyze code"
-        }
-
-    async def _parse_response(self, result: str) -> Dict:
-        """Parse and clean up Grok response"""
-        try:
-            parsed = json.loads(result)
-            if "vulnerabilities" not in parsed:
-                return {
-                    "vulnerabilities": [],
-                    "overall_score": 0,
-                    "summary": "No vulnerabilities found"
-                }
-            
-            # 确保所有漏洞都标记为 AI 来源
-            for vuln in parsed.get("vulnerabilities", []):
-                vuln["source"] = "ai"
-            
-            # 确保返回格式一致
-            if "overall_score" not in parsed:
-                parsed["overall_score"] = 0
-            if "summary" not in parsed:
-                parsed["summary"] = "Analysis completed"
-            
-            return parsed
-            
-        except Exception as e:
-            logger.error(f"Error parsing Grok response: {e}")
-            return {
-                "vulnerabilities": [],
-                "overall_score": 0,
-                "summary": "Failed to parse response"
-            }
-
-    async def deduplicate_vulnerabilities(self, vulnerabilities: List[Dict]) -> List[Dict]:
-        """Deduplicate and merge similar vulnerabilities using AI"""
-        if not vulnerabilities:
-            return []
-        
-        try:
-            # 首先进行基本的去重
-            unique_vulns = []
-            seen = set()
-            
-            for vuln in vulnerabilities:
-                key = (vuln.get("title", ""), vuln.get("file", ""), vuln.get("line_number", 0))
-                if key not in seen:
-                    seen.add(key)
-                    unique_vulns.append(vuln)
-            
-            if len(unique_vulns) <= 1:
-                return unique_vulns
-            
-            # 然后使用 AI 进行更智能的去重
-            dedup_prompt = """
-            Please analyze these vulnerability findings and remove duplicates or merge similar issues.
-            Return the result as a JSON array of unique vulnerabilities.
-            Each vulnerability should keep its original format with all fields.
-            
-            Original vulnerabilities:
-            {vulns}
-            """
-            
-            dedup_response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "You are a security expert helping to deduplicate vulnerability findings."},
-                    {"role": "user", "content": dedup_prompt.format(vulns=json.dumps(unique_vulns, indent=2))}
-                ]
-            )
-            
-            content = dedup_response.choices[0].message.content
-            logger.debug(f"Deduplication response: {content}")
-            
-            try:
-                dedup_result = json.loads(content)
-                if isinstance(dedup_result, list):
-                    return dedup_result
-                elif isinstance(dedup_result, dict) and "vulnerabilities" in dedup_result:
-                    return dedup_result["vulnerabilities"]
-                return unique_vulns
-                
-            except json.JSONDecodeError:
-                logger.error("Failed to parse AI deduplication response")
-                return unique_vulns
-                
-        except Exception as e:
-            logger.error(f"Error during AI deduplication: {e}")
-            return vulnerabilities
-
-    async def analyze_code(self, code: str, file_path: str, context: Dict = None) -> Dict:
+    async def _analyze_with_ai(self, code: str, file_path: str, context: Dict = None) -> Dict:
         """Analyze code using Grok API"""
         try:
-            # 验证输入
-            if not code or not isinstance(code, str):
-                return self._get_default_response()
-            if not file_path or not isinstance(file_path, str):
-                return self._get_default_response()
+            # 构建提示
+            prompt = f"""
+            Analyze this code for security vulnerabilities and respond in JSON format only:
             
-            # 跳过测试文件
-            if "/tests/" in file_path or "\\tests\\" in file_path:
-                return {
-                    "vulnerabilities": [],
-                    "overall_score": 100,
-                    "summary": "Skipped test file"
-                }
+            File: {file_path}
             
-            system_prompt = """You are a security code analyzer. Analyze the given code for security vulnerabilities.
-            Focus on real, exploitable security issues only. Avoid reporting:
-            - Code style issues
-            - Best practice violations that don't have direct security impact
-            - Theoretical vulnerabilities without clear exploit paths
-            - Issues in test code or example code
-
-            Before reporting a vulnerability, verify:
-            1. The vulnerability is in production code
-            2. There is a clear and realistic attack scenario
-            3. The vulnerability can be exploited by an attacker
-            4. The impact is significant enough to warrant fixing
-
-            Return your findings in the following JSON format ONLY:
-            {
-                "vulnerabilities": [
-                    {
-                        "type": "Type of the vulnerability (e.g. SQL Injection, XSS, etc.)",
-                        "severity": <integer 1-10, based on CVSS scoring>,
-                        "description": "Brief description of the vulnerability",
-                        "line_number": <integer>,
-                        "file": "<file path>",
-                        "risk_analysis": "Detailed analysis of potential risks and impacts, including exploit scenarios",
-                        "recommendation": "Specific recommendations to fix the issue"
-                    }
-                ],
-                "overall_score": <integer 0-100>,
-                "summary": "Brief summary of findings"
-            }
-
-            Important:
-            - Only report vulnerabilities that have clear security impact
-            - Severity should follow CVSS scoring guidelines
-            - Each vulnerability must have a concrete exploit scenario
-            - Line number must point to the exact vulnerable code
-            - If no real security vulnerabilities found, return empty array"""
+            {code}
+            """
             
+            # 调用 API
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"Please analyze this code for security vulnerabilities. File: {file_path}\n\nCode:\n{code}"}
-                ]
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,  # 降低温度以获得更一致的输出
+                max_tokens=2000,
+                response_format={"type": "json_object"}  # 强制 JSON 响应
             )
             
-            logger.debug(f"Raw Grok response: {response}")
+            # 检查响应是否为空
+            if not response.choices or not response.choices[0].message.content:
+                logger.error("Empty response from Grok API")
+                return self._get_default_response()
             
+            # 解析响应
             try:
                 content = response.choices[0].message.content.strip()
                 logger.debug(f"Raw response content: {content}")
                 
+                # 尝试清理响应内容
+                if content.startswith("```json"):
+                    content = content.split("```json")[1]
+                if content.endswith("```"):
+                    content = content.rsplit("```", 1)[0]
+                content = content.strip()
+                
                 try:
-                    findings = json.loads(content)
-                    if isinstance(findings, dict):
-                        # 标准化返回格式
-                        result = {
-                            "vulnerabilities": [],
-                            "overall_score": 100,
-                            "summary": "No vulnerabilities found"
-                        }
-                        
-                        if "vulnerabilities" in findings:
-                            vulns = []
-                            required_fields = ["type", "severity", "description", "line_number", 
-                                            "file", "risk_analysis", "recommendation"]
-                            
-                            for vuln in findings["vulnerabilities"]:
-                                if all(k in vuln for k in required_fields):
-                                    clean_vuln = {
-                                        "type": str(vuln["type"]).strip(),
-                                        "severity": int(vuln["severity"]),
-                                        "description": str(vuln["description"]).strip(),
-                                        "line_number": int(vuln["line_number"]),
-                                        "file": file_path,
-                                        "risk_analysis": str(vuln["risk_analysis"]).strip(),
-                                        "recommendation": str(vuln["recommendation"]).strip()
-                                    }
-                                    vulns.append(clean_vuln)
-                            
-                            if vulns:
-                                result["vulnerabilities"] = vulns
-                                # 使用最高严重性作为整体分数
-                                max_severity = max(v["severity"] for v in vulns)
-                                result["overall_score"] = max(0, 100 - (max_severity * 10))
-                                result["summary"] = f"Found {len(vulns)} security issues"
-                                
-                        return result
-                        
-                except (json.JSONDecodeError, KeyError, ValueError) as e:
-                    logger.error(f"Failed to parse response as JSON: {e}")
+                    result = json.loads(content)
+                    if not isinstance(result, dict):
+                        raise ValueError("Response is not a dictionary")
+                    
+                    # 确保有 vulnerabilities 字段
+                    if "vulnerabilities" not in result:
+                        result = {"vulnerabilities": []}
+                    
+                    # 标准化结果
+                    for vuln in result["vulnerabilities"]:
+                        vuln["file"] = file_path
+                        # 确保所有必需字段都存在
+                        for field in ["type", "severity", "description", "line_number", "risk_analysis", "recommendation", "confidence"]:
+                            if field not in vuln:
+                                if field == "severity":
+                                    vuln[field] = 5  # 默认中等严重性
+                                else:
+                                    vuln[field] = "Not provided"
+                    
+                    return result
+                    
+                except json.JSONDecodeError as e:
+                    logger.error(f"JSON decode error: {e}")
                     logger.debug(f"Failed content: {content}")
                     return self._get_default_response()
                 
             except Exception as e:
-                logger.error(f"Error parsing Grok response: {e}")
+                logger.error(f"Error processing response: {e}")
+                logger.debug(f"Response object: {response}")
                 return self._get_default_response()
-                
+            
         except Exception as e:
             logger.error(f"Error calling Grok API: {e}")
-            return self._get_default_response() 
+            return self._get_default_response()
+    
+    def _calculate_security_score(self, vulnerabilities: List[Dict]) -> float:
+        """Calculate security score based on vulnerabilities"""
+        if not vulnerabilities:
+            return 100.0
+        # 使用最高严重性作为基准
+        max_severity = max(v.get("severity", 0) for v in vulnerabilities)
+        return max(0, 100 - (max_severity * 10))
+
+    def merge_results(self, semgrep_results: List[Dict], ai_results: Dict) -> Dict:
+        """Merge semgrep and AI results"""
+        all_vulns = []
+        
+        # 添加 semgrep 结果
+        for vuln in semgrep_results:
+            all_vulns.append(vuln)
+        
+        # 添加 AI 结果
+        if "vulnerabilities" in ai_results:
+            all_vulns.extend(ai_results["vulnerabilities"])
+        
+        # 计算总体分数
+        score = self._calculate_security_score(all_vulns)
+        
+        return {
+            "vulnerabilities": all_vulns,
+            "overall_score": score,
+            "summary": f"Found {len(all_vulns)} vulnerabilities ({len(semgrep_results)} from semgrep, {len(ai_results.get('vulnerabilities', []))} from AI analysis). Security Score: {score}%"
+        }
+
+    async def deduplicate_vulnerabilities(self, vulnerabilities: List[Dict]) -> List[Dict]:
+        """使用基类的去重逻辑"""
+        return await super().deduplicate_vulnerabilities(vulnerabilities) 

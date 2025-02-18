@@ -8,23 +8,26 @@ import httpx
 import asyncio
 import os
 import random
+from .base import AIProvider
+from openai import AsyncOpenAI  # 修改导入
 
 logger = logging.getLogger(__name__)
 
-class DeepseekProvider(OpenAIProvider):
+class DeepseekProvider(AIProvider):
     """Deepseek AI provider for code analysis"""
     
     def __init__(self, api_key: str):
-        # 调用父类初始化，但使用自定义 base_url
-        super().__init__(
+        super().__init__(api_key)
+        # 使用 AsyncOpenAI 替代 DeepseekClient
+        self.client = AsyncOpenAI(
             api_key=api_key,
-            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-            model="deepseek-r1"  # 使用 Deepseek 模型
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
         )
-        self.timeout = httpx.Timeout(60.0)  # 增加超时时间到60秒
+        self.model = "deepseek-r1"  # 修改为正确的模型名称
+        self.timeout = httpx.Timeout(60.0)
         self.max_retries = 3
-        self.concurrent_limit = 2  # 降低并发限制
-        self.batch_delay = 1.0  # 增加批次间延迟
+        self.concurrent_limit = 2
+        self.batch_delay = 1.0
         
     def _get_default_response(self) -> Dict:
         """Get default response when analysis fails"""
@@ -33,6 +36,34 @@ class DeepseekProvider(OpenAIProvider):
             "overall_score": 0,
             "summary": "Analysis failed"
         }
+        
+    async def _analyze_with_ai(self, code: str, file_path: str, context: Dict = None) -> Dict:
+        """Deepseek-specific implementation"""
+        try:
+            logger.info(f"Starting Deepseek analysis for {file_path}")
+            
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": self._get_system_prompt()},
+                    {"role": "user", "content": f"Analyze this code:\n\n{code}"}
+                ],
+                timeout=self.timeout
+            )
+            
+            content = response.choices[0].message.content
+            logger.debug(f"Raw response content: {content}")
+            
+            try:
+                return json.loads(content)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse response as JSON: {e}")
+                logger.debug(f"Failed content: {content}")
+                return self._get_default_response()
+                
+        except Exception as e:
+            logger.error(f"Error calling Deepseek API: {e}")
+            return self._get_default_response()
         
     async def analyze_code(self, code: str, file_path: str, context: Dict = None) -> Dict[str, Any]:
         """Analyze code using Deepseek AI"""
@@ -91,7 +122,7 @@ class DeepseekProvider(OpenAIProvider):
             await asyncio.sleep(random.uniform(0.5, 2.0))
             
             completion = await self.client.chat.completions.create(
-                model="deepseek-r1",
+                model=self.model,
                 messages=[
                     {"role": "system", "content": "You are a security code analyzer. Analyze the code for security vulnerabilities and provide detailed findings in JSON format."},
                     {"role": "user", "content": prompt}
@@ -230,30 +261,18 @@ class DeepseekProvider(OpenAIProvider):
             return self._get_default_response()
 
     def merge_results(self, semgrep_results: List[Dict], ai_results: Dict) -> Dict:
-        """Merge semgrep and AI analysis results"""
-        merged_vulnerabilities = []
+        """Merge semgrep and AI results"""
+        all_vulns = []
+        all_vulns.extend(semgrep_results)
+        if "vulnerabilities" in ai_results:
+            all_vulns.extend(ai_results["vulnerabilities"])
         
-        # 添加 semgrep 结果
-        for vuln in semgrep_results:
-            if not isinstance(vuln, dict):
-                continue
-            vuln["source"] = "semgrep"
-            merged_vulnerabilities.append(vuln)
-        
-        # 添加 AI 结果
-        for vuln in ai_results.get("vulnerabilities", []):
-            if not isinstance(vuln, dict):
-                continue
-            vuln["source"] = "ai"
-            merged_vulnerabilities.append(vuln)
-        
-        # 计算整体安全分数
-        score = self._calculate_security_score(merged_vulnerabilities)
+        score = self._calculate_security_score(all_vulns)
         
         return {
-            "vulnerabilities": merged_vulnerabilities,
+            "vulnerabilities": all_vulns,
             "overall_score": score,
-            "summary": f"Found {len(merged_vulnerabilities)} vulnerabilities"
+            "summary": f"Found {len(all_vulns)} vulnerabilities ({len(semgrep_results)} from semgrep, {len(ai_results.get('vulnerabilities', []))} from AI analysis). Security Score: {score}%"
         }
         
     def _calculate_security_score(self, vulnerabilities: List[Dict]) -> float:

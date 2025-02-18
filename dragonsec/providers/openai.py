@@ -13,9 +13,9 @@ class OpenAIProvider(AIProvider):
     def __init__(self, api_key: str, base_url: str = None, model: str = "gpt-4"):
         super().__init__(api_key=api_key)
         self.client = AsyncOpenAI(
-            api_key=self._api_key,
+            api_key=self.api_key,
             base_url=base_url
-        ) if base_url else AsyncOpenAI(api_key=self._api_key)
+        ) if base_url else AsyncOpenAI(api_key=self.api_key)
         self.model = model
         self.context_cache = {}
         self.SYSTEM_PROMPT = """
@@ -315,3 +315,27 @@ Provide your analysis in the following JSON format:
     ]
 }}
 """
+
+    async def _analyze_with_ai(self, code: str, file_path: str, context: Dict = None) -> Dict:
+        """OpenAI-specific implementation"""
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": self._get_system_prompt()},
+                    {"role": "user", "content": f"Analyze this code:\n\n{code}"}
+                ]
+            )
+            
+            content = response.choices[0].message.content
+            logger.debug(f"Raw response content: {content}")
+            
+            try:
+                return json.loads(content)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse response as JSON: {e}")
+                return self._get_default_response()
+                
+        except Exception as e:
+            logger.error(f"Error calling OpenAI API: {e}")
+            return self._get_default_response()
