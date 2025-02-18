@@ -30,12 +30,12 @@ class FileContext:
     def _is_path_allowed(self, path: Path) -> bool:
         """检查路径是否在允许的范围内"""
         try:
-            path = path.resolve()
-            
-            # 检查是否是符号链接
+            # 先检查是否是符号链接
             if path.is_symlink():
                 logger.warning(f"Symlink detected: {path}")
                 return False
+            
+            path = path.resolve()
             
             # 检查文件权限
             if os.access(path, os.W_OK):
@@ -72,10 +72,32 @@ class FileContext:
                 # 自动添加文件所在目录到允许列表
                 self.add_allowed_path(str(path.parent))
             
-            # 读取并分析文件
-            with open(path, 'r', encoding='utf-8') as f:
-                content = f.read()
-                
+            # 检查是否是二进制文件
+            try:
+                with open(path, 'rb') as f:
+                    is_binary = b'\0' in f.read(1024)
+                    if is_binary:
+                        return {
+                            "content": "",
+                            "imports": [],
+                            "related_files": [],
+                            "error": "Binary file detected"
+                        }
+            except Exception as e:
+                return self._get_error_response(f"Error reading file: {e}")
+            
+            # 读取文本内容
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+            except UnicodeDecodeError:
+                return {
+                    "content": "",
+                    "imports": [],
+                    "related_files": [],
+                    "error": "Binary or non-UTF8 file detected"
+                }
+            
             # 分析导入
             imports = self.analyze_imports(content)
             

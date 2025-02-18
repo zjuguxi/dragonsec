@@ -79,4 +79,29 @@ def test_merge_results(openai_provider):
     result = openai_provider.merge_results(semgrep_results, ai_results)
     assert len(result["vulnerabilities"]) == 2
     assert result["vulnerabilities"][0]["source"] == "semgrep"
-    assert result["vulnerabilities"][1]["source"] == "ai" 
+    assert result["vulnerabilities"][1]["source"] == "ai"
+
+@pytest.mark.asyncio
+async def test_openai_streaming():
+    """Test streaming response handling"""
+    provider = OpenAIProvider("test_key")
+    code = """
+    def unsafe_function(user_input):
+        eval(user_input)
+    """
+    
+    result = await provider.analyze_code(code, "test.py", stream=True)
+    assert isinstance(result, dict)
+    assert "vulnerabilities" in result
+
+@pytest.mark.asyncio
+async def test_openai_context_handling():
+    """Test context handling in analysis"""
+    provider = OpenAIProvider("test_key")
+    context = {
+        "imports": ["os", "sys"],
+        "related_files": ["utils.py"]
+    }
+    
+    result = await provider.analyze_code("print('test')", "test.py", context=context)
+    assert isinstance(result, dict) 

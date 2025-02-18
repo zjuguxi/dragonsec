@@ -380,3 +380,25 @@ async def test_scanner_with_invalid_files():
         assert results["metadata"]["skipped_files"] > 0
     finally:
         shutil.rmtree(test_dir)
+
+@pytest.mark.asyncio
+async def test_scanner_batch_processing():
+    """Test batch processing of files"""
+    scanner = SecurityScanner(mode=ScanMode.SEMGREP_ONLY, batch_size=2)
+    
+    # Create test files
+    files = [
+        "test1.py", "test2.py", "test3.py"
+    ]
+    results = await scanner.process_batch(files)
+    assert len(results) == 3
+
+@pytest.mark.asyncio
+async def test_scanner_error_handling():
+    """Test scanner error handling"""
+    scanner = SecurityScanner()
+    
+    # Test with non-existent directory
+    result = await scanner.scan_directory("/nonexistent/path")
+    assert result["overall_score"] == 100
+    assert "error" in result["metadata"]

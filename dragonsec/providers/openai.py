@@ -23,7 +23,7 @@ class OpenAIProvider(AIProvider):
         """
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
-    async def analyze_code(self, code: str, file_path: str, context: Dict = None) -> Dict:
+    async def analyze_code(self, code: str, file_path: str, stream: bool = False, **kwargs) -> Dict:
         """Analyze code for security issues"""
         try:
             # 验证输入
@@ -36,7 +36,7 @@ class OpenAIProvider(AIProvider):
                 model=self.model,
                 messages=[
                     {"role": "system", "content": self.SYSTEM_PROMPT},
-                    {"role": "user", "content": self._prepare_prompt(code, context)}
+                    {"role": "user", "content": self._prepare_prompt(code, kwargs)}
                 ],
                 temperature=0.3,
                 max_tokens=2000

@@ -134,4 +134,29 @@ def test_file_context_with_js_imports(tmp_path):
     result = context.get_context(str(test_file))
     assert "crypto" in result["imports"]
     assert "@company/auth" in result["imports"]
-    assert "./security" in result["imports"] 
+    assert "./security" in result["imports"]
+
+def test_file_context_symlink_handling(tmp_path):
+    """Test handling of symbolic links"""
+    # Create a test file and a symlink
+    real_file = tmp_path / "real.py"
+    real_file.write_text("print('test')")
+    symlink = tmp_path / "link.py"
+    symlink.symlink_to(real_file)
+    
+    context = FileContext()
+    context.set_scan_root(str(tmp_path))
+    
+    # Test symlink detection
+    assert not context._is_path_allowed(symlink)
+
+def test_file_context_binary_file_handling(tmp_path):
+    """Test handling of binary files"""
+    # Create a binary file
+    binary_file = tmp_path / "test.bin"
+    with open(binary_file, 'wb') as f:
+        f.write(b'\x00\x01\x02\x03')
+    
+    context = FileContext()
+    result = context.get_context(str(binary_file))
+    assert result["error"] is not None 

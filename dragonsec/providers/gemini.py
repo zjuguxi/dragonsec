@@ -1,5 +1,5 @@
 import google.generativeai as genai
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import json
 from pathlib import Path
 from .base import AIProvider
@@ -341,4 +341,12 @@ class GeminiProvider(AIProvider):
                 
         except Exception as e:
             logger.error(f"Error calling Gemini API: {e}")
-            return self._get_default_response() 
+            return self._get_default_response()
+
+    async def analyze_batch(self, files: List[Tuple[str, str]]) -> List[Dict]:
+        """批量分析代码文件"""
+        results = []
+        for code, file_path in files:
+            result = await self.analyze_code(code, file_path)
+            results.append(result)
+        return results 

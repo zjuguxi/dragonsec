@@ -5,6 +5,7 @@ from tests.providers.test_openai import (
     test_analyze_code_success as test_openai_analyze_success,
     test_analyze_code_error as test_openai_analyze_error,
 )
+import asyncio
 
 @pytest.fixture
 def openai_provider(deepseek_provider):
@@ -90,4 +91,28 @@ def test_calculate_security_score(deepseek_provider):
 def test_empty_vulnerabilities_score(deepseek_provider):
     """Test security score with no vulnerabilities"""
     score = deepseek_provider._calculate_security_score([])
-    assert score == 100.0 
+    assert score == 100.0
+
+@pytest.mark.asyncio
+async def test_deepseek_rate_limiting():
+    """Test rate limiting behavior"""
+    provider = DeepseekProvider("test_key")
+    
+    # Test multiple requests in quick succession
+    results = await asyncio.gather(*[
+        provider.analyze_code("print('test')", f"test_{i}.py")
+        for i in range(3)
+    ])
+    
+    assert len(results) == 3
+    assert all(isinstance(r, dict) for r in results)
+
+@pytest.mark.asyncio
+async def test_deepseek_error_recovery():
+    """Test error recovery mechanisms"""
+    provider = DeepseekProvider("test_key")
+    
+    # Test with malformed code
+    result = await provider.analyze_code("def broken_func(:", "test.py")
+    assert isinstance(result, dict)
+    assert "vulnerabilities" in result 

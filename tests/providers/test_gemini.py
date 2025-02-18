@@ -129,4 +129,33 @@ async def test_merge_results():
         merged = provider.merge_results(semgrep_results, ai_results)
         assert len(merged["vulnerabilities"]) == 2
         assert merged["vulnerabilities"][0]["source"] == "semgrep"
-        assert merged["vulnerabilities"][1]["source"] == "ai" 
+        assert merged["vulnerabilities"][1]["source"] == "ai"
+
+@pytest.mark.asyncio
+async def test_gemini_analyze_batch():
+    """Test batch analysis with Gemini"""
+    provider = GeminiProvider("test_key")
+    files = [
+        ("def unsafe_sql(user_input):\n    return f'SELECT * FROM users WHERE id = {user_input}'", 
+         "app.py"),
+        ("const password = 'hardcoded_secret';", 
+         "config.js")
+    ]
+    
+    results = await provider.analyze_batch(files)
+    assert isinstance(results, list)
+    assert len(results) == 2
+    assert all("vulnerabilities" in r for r in results)
+
+@pytest.mark.asyncio
+async def test_gemini_error_handling():
+    """Test error handling in Gemini provider"""
+    provider = GeminiProvider("test_key")
+    
+    # Test with invalid input
+    result = await provider.analyze_code(None, "test.py")
+    assert result["vulnerabilities"] == []
+    
+    # Test with empty code
+    result = await provider.analyze_code("", "test.py")
+    assert result["vulnerabilities"] == [] 

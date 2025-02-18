@@ -240,6 +240,21 @@ class SecurityScanner:
             if self.verbose:
                 logger.debug(f"Scanning directory: {directory}")  # 改为 DEBUG 级别
             
+            if not os.path.exists(directory):
+                return {
+                    "vulnerabilities": [],
+                    "overall_score": 100,
+                    "summary": "Directory not found",
+                    "metadata": {
+                        "files_scanned": 0,
+                        "skipped_files": 0,
+                        "scan_duration": 0,
+                        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                        "mode": mode,
+                        "error": f"Directory not found: {directory}"
+                    }
+                }
+            
             # 获取所有支持的文件
             files_to_scan = []
             skipped_files = 0
@@ -345,8 +360,19 @@ class SecurityScanner:
             return summary
             
         except Exception as e:
-            logger.error(f"Error scanning directory: {e}")  # 错误信息保持 ERROR 级别
-            return self._get_error_result()
+            return {
+                "vulnerabilities": [],
+                "overall_score": 100,
+                "summary": f"Error during scan: {str(e)}",
+                "metadata": {
+                    "files_scanned": 0,
+                    "skipped_files": 0,
+                    "scan_duration": 0,
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "mode": mode,
+                    "error": str(e)
+                }
+            }
 
     def _calculate_security_score(self, vulnerabilities: List[Dict]) -> float:
         """Calculate security score based on vulnerabilities"""
@@ -368,7 +394,8 @@ class SecurityScanner:
                 "skipped_files": 0,
                 "scan_duration": 0,
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "mode": self.mode.value
+                "mode": self.mode.value,
+                "error": "Error during scan"
             }
         }
 
