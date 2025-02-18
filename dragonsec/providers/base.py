@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List
 import logging
+import json
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -186,8 +188,39 @@ class AIProvider(ABC):
     
     @property
     def system_prompt(self) -> str:
-        """Get the system prompt, can be overridden by providers"""
-        return self.base_system_prompt
+        return """
+        You are a security expert. Follow these principles when analyzing code:
+
+        1. Context Understanding:
+           - Distinguish between code patterns and actual vulnerabilities
+           - Consider the execution context and deployment environment
+           - Understand common security design patterns
+        
+        2. Code Pattern Recognition:
+           SAFE patterns:
+           - Constructor parameters
+           - Environment variables
+           - Configuration loading
+           - Dependency injection
+           
+           UNSAFE patterns:
+           - String literals containing secrets
+           - Inline credentials
+           - Bypassed security controls
+           - Direct system calls
+        
+        3. Risk Assessment Framework:
+           - Impact: What's the potential damage?
+           - Exploitability: How easy to exploit?
+           - Context: Is this production code?
+           - Controls: What security measures exist?
+
+        Only report issues that meet ALL criteria:
+        1. Confirmed vulnerability (not just a pattern)
+        2. Real security impact
+        3. Actual exposure risk
+        4. Missing security controls
+        """
     
     def _standardize_vulnerability(self, vuln: Dict, file_path: str) -> Dict:
         """Standardize vulnerability format"""
@@ -265,4 +298,69 @@ class AIProvider(ABC):
                 seen.add(key)
                 unique_vulns.append(vuln)
         
-        return unique_vulns 
+        return unique_vulns
+
+    def _prepare_prompt(self, code: str, context: Dict = None) -> str:
+        return f"""
+        Examples of what NOT to flag:
+        ```python
+        def __init__(self, api_key: str):
+            self.api_key = api_key  # SAFE: Parameter injection
+        
+        def connect(self, password=os.getenv("DB_PASS")):
+            self.db.connect(password)  # SAFE: Environment variable
+        ```
+        
+        Examples of what to flag:
+        ```python
+        PASSWORD = "admin123"  # UNSAFE: Hardcoded credential
+        api_key = "sk-1234567890abcdef"  # UNSAFE: Actual API key
+        ```
+        
+        Code to analyze:
+        {code}
+        
+        Context:
+        {json.dumps(context) if context else 'No additional context'}
+        """ 
+
+    def _get_decision_prompt(self) -> str:
+        return """
+        For each potential issue, follow this decision tree:
+
+        1. Is it a code pattern?
+           Yes -> Is it a security pattern?
+                 Yes -> SAFE
+                 No  -> Continue
+           No  -> Continue
+        
+        2. Is it actual data?
+           Yes -> Is it sensitive?
+                 Yes -> Is it production?
+                      Yes -> REPORT
+                      No  -> SAFE
+                 No  -> SAFE
+           No  -> SAFE
+        """ 
+
+    def _get_context_categories(self) -> str:
+        return """
+        Security Context Categories:
+
+        1. Infrastructure Code
+           - Configuration management
+           - Deployment scripts
+           - Build tools
+        
+        2. Application Code
+           - Business logic
+           - API endpoints
+           - Data processing
+        
+        3. Test Code
+           - Unit tests
+           - Integration tests
+           - Benchmarks
+        
+        Adjust severity and reporting based on category.
+        """ 

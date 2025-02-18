@@ -104,10 +104,15 @@ class SecurityScanner:
         }
         
         # 设置日志级别
+        root_logger = logging.getLogger()
         if verbose:
-            logging.getLogger('dragonsec').setLevel(logging.DEBUG)
+            root_logger.setLevel(logging.DEBUG)
         else:
-            logging.getLogger('dragonsec').setLevel(logging.WARNING)  # 只显示警告和错误
+            # 在非 verbose 模式下，设置更高的日志级别
+            root_logger.setLevel(logging.WARNING)
+            # 特别设置 httpx 和 openai 的日志级别
+            logging.getLogger('httpx').setLevel(logging.WARNING)
+            logging.getLogger('openai').setLevel(logging.WARNING)
 
     def _create_provider(self, mode: ScanMode, api_key: str) -> AIProvider:
         providers = {

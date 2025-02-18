@@ -11,7 +11,17 @@ logger = logging.getLogger(__name__)
 
 class OpenAIProvider(AIProvider):
     def __init__(self, api_key: str, base_url: str = None, model: str = "gpt-4"):
+        """Initialize OpenAI provider
+        
+        Args:
+            api_key (str): API key from environment or secure storage
+            base_url (str, optional): Custom API endpoint
+            model (str, optional): Model to use. Defaults to "gpt-4"
+        """
+        # API key should be provided at runtime, not hardcoded
         super().__init__(api_key=api_key)
+        
+        # Initialize client with runtime credentials
         self.client = AsyncOpenAI(
             api_key=self.api_key,
             base_url=base_url
