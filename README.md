@@ -14,7 +14,7 @@ DragonSec is an advanced security scanner that combines traditional static analy
 
 - **Multiple AI Models Support**:
   - OpenAI GPT-4o
-  - Google Gemini Pro
+  - Google Gemini-1.5-flash
   - Deepseek R1 (Aliyun)
   - More models coming soon...
 
@@ -48,10 +48,10 @@ export DEEPSEEK_API_KEY="your-deepseek-key"  # For Deepseek
 # Using OpenAI GPT-4
 dragonsec scan --path /path/to/code --mode openai --api-key $OPENAI_API_KEY
 
-# Using Google Gemini
+# Using Google Gemini-1.5-flash
 dragonsec scan --path /path/to/code --mode gemini --api-key $GEMINI_API_KEY
 
-# Using Deepseek Code-1
+# Using Deepseek R1 (Aliyun)
 dragonsec scan --path /path/to/code --mode deepseek --api-key $DEEPSEEK_API_KEY
 
 # Using only Semgrep (no API key needed)
