@@ -56,24 +56,52 @@ class AIProvider(ABC):
         - Example code is not production code
         
         Context awareness for deserialization:
-        - Internal data files (like cache, system data) are lower risk
-        - User-controlled input is high risk
-        - Network-sourced data is high risk
-        - Command line arguments are medium risk
-        - Environment variables are medium risk
+        NEVER report pickle usage in these scenarios (no exceptions):
+        1. Data tooling:
+           - Data generation scripts
+           - Data loading utilities
+           - Data preparation tools
+           - Data conversion tools
+           - Data bundling tools
+
+        2. Internal data:
+           - System generated files
+           - Configuration files
+           - Cache files
+           - State files
+           - Temporary data
+
+        3. Development tools:
+           - Build scripts
+           - Setup tools
+           - Test utilities
+           - Benchmark tools
+           - Analysis tools
+
+        ONLY report when ALL of these are true:
+        1. External attack surface exists:
+           - Public web endpoint
+           - Network service
+           - Public API
+        2. Direct user input:
+           - File uploads
+           - Network requests
+           - User-provided data
+        3. No security controls:
+           - No input validation
+           - No access controls
+           - No environment isolation
+
+        If ANY of the DO NOT REPORT conditions are met, 
+        the finding should be skipped completely, 
+        regardless of other factors.
         
-        For each vulnerability, you MUST:
-        1. Confirm it's in production code (not tests/benchmarks/examples)
-        2. Provide a specific exploit scenario
-        3. Show the attack path
-        4. Demonstrate actual impact
-        
-        Rate confidence based on data source:
-        - high: Direct user input, network data, file uploads
-        - medium: Command line args, environment vars
-        - low: Internal data files, system generated data
-        
-        Only report high and medium confidence findings.
+        Rate severity based on context:
+        - Critical (9-10): Web/API endpoints accepting user data
+        - High (7-8): Network services with external input
+        - Medium (5-6): Internal services with indirect exposure
+        - Low (3-4): Internal tools with controlled input
+        - Info (1-2): Developer utilities with trusted data
         
         Respond with valid JSON only, using this structure:
         {
@@ -97,6 +125,44 @@ class AIProvider(ABC):
         6-7: Medium - Information disclosure, DoS
         4-5: Low - Limited impact vulnerabilities
         1-3: Info - Minor security concerns
+
+        Context awareness for credentials:
+        DO NOT report when:
+        - Credentials are passed as parameters
+        - Keys are loaded from environment variables
+        - Using standard credential management
+        - Configuration objects handle secrets
+        - Base classes process credentials
+
+        ONLY report when:
+        1. Actual secret values are hardcoded
+        2. Credentials are stored in plain text
+        3. Production keys are committed
+        4. Default passwords are used
+
+        For path traversal:
+        DO NOT report when:
+        - Tool is CLI-only
+        - No network exposure
+        - Used by developers only
+        - Has path validation
+        - Uses Path.resolve()
+        - Checks against root directory
+        - Has logging and error handling
+
+        ONLY report path traversal when:
+        1. Exposed via web/API endpoints
+        2. Accepts network input
+        3. No path validation
+        4. Direct file system access
+        5. Public facing service
+
+        Rate severity based on exposure:
+        - Critical (9-10): Public web/API endpoints
+        - High (7-8): Network services
+        - Medium (5-6): Web admin tools
+        - Low (3-4): Internal CLI tools
+        - Info (1-2): Developer utilities
         """
     
     def _secure_api_key(self, api_key: str) -> str:

@@ -9,45 +9,97 @@ import logging
 logger = logging.getLogger(__name__)
 
 class FileContext:
+    """File context manager for security scanning"""
+    
     def __init__(self):
         self.root_indicators = {'.git', 'package.json', 'setup.py', 'pom.xml', 'build.gradle'}
-        self._scan_root = None  # 添加实例变量
+        self._scan_root = None
+        self._allowed_paths = set()
+        self._imports = []  # 添加导入列表
 
     def set_scan_root(self, path: str) -> None:
         """设置扫描根目录"""
-        self._scan_root = os.path.abspath(os.path.expanduser(path))
+        self._scan_root = Path(os.path.abspath(os.path.expanduser(path))).resolve()
+        self._allowed_paths = {self._scan_root}  # 重置允许的路径
+        
+    def add_allowed_path(self, path: str) -> None:
+        """添加额外的允许路径"""
+        abs_path = Path(os.path.abspath(os.path.expanduser(path))).resolve()
+        self._allowed_paths.add(abs_path)
+    
+    def _is_path_allowed(self, path: Path) -> bool:
+        """检查路径是否在允许的范围内"""
+        try:
+            path = path.resolve()
+            
+            # 检查是否是符号链接
+            if path.is_symlink():
+                logger.warning(f"Symlink detected: {path}")
+                return False
+            
+            # 检查文件权限
+            if os.access(path, os.W_OK):
+                logger.debug(f"File is writable: {path}")
+            
+            # 使用 os.path.commonpath 进行更严格的路径检查
+            for allowed_path in self._allowed_paths:
+                allowed_path = allowed_path.resolve()
+                try:
+                    common = os.path.commonpath([str(path), str(allowed_path)])
+                    if common == str(allowed_path):
+                        return True
+                except ValueError:
+                    continue
+            
+            logger.warning(f"Path not in allowed directories: {path}")
+            return False
+            
+        except Exception as e:
+            logger.error(f"Error checking path: {e}")
+            return False
+    
+    def get_context(self, file_path: str) -> Dict:
+        """Get context information for a file"""
+        try:
+            path = Path(file_path).resolve()
+            
+            # 如果没有设置扫描根目录，使用文件所在目录
+            if not self._scan_root:
+                self.set_scan_root(str(path.parent))
+            
+            # 检查路径是否在允许的范围内
+            if not self._is_path_allowed(path):
+                # 自动添加文件所在目录到允许列表
+                self.add_allowed_path(str(path.parent))
+            
+            # 读取并分析文件
+            with open(path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                
+            # 分析导入
+            imports = self.analyze_imports(content)
+            
+            return {
+                "content": content,
+                "imports": imports,
+                "related_files": self.find_related_files(str(path)),
+                "error": None
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting context for {file_path}: {e}")
+            return {
+                "content": "",
+                "imports": [],
+                "related_files": [],
+                "error": str(e)
+            }
 
     def _get_scan_root(self) -> Path:
         """获取扫描根目录"""
         if self._scan_root is None:
             return Path(os.getenv('DRAGONSEC_SCAN_ROOT', Path.cwd())).resolve()
         return Path(self._scan_root).resolve()
-
-    def get_context(self, file_path: str) -> Dict:
-        """Get context information for a file"""
-        try:
-            path = Path(file_path).resolve()
-            if not path.exists():
-                raise FileNotFoundError(f"File not found: {file_path}")
-            if not path.is_file():
-                raise ValueError(f"Not a file: {file_path}")
-            
-            # 使用扫描根目录
-            scan_root = self._get_scan_root()
-            if not str(path).startswith(str(scan_root)):
-                logger.debug(f"File outside scan root: {file_path}")  # 改为 debug 级别
-            
-            with open(path, 'r', encoding='utf-8') as f:
-                content = f.read()
-                
-            return {
-                "content": content,
-                "imports": self.analyze_imports(content),
-                "related_files": self.find_related_files(str(path))
-            }
-        except Exception as e:
-            logger.error(f"Error getting context for {file_path}: {e}")
-            return {"content": "", "imports": [], "related_files": []}
 
     def find_project_root(self, file_path: str) -> Optional[str]:
         current = Path(file_path).parent
@@ -195,3 +247,12 @@ class FileContext:
         except Exception as e:
             logger.error(f"Error checking file path: {e}")
             return False
+
+    def _get_error_response(self, error_msg: str) -> Dict:
+        """统一的错误响应格式"""
+        return {
+            "content": "",
+            "imports": [],
+            "related_files": [],
+            "error": error_msg
+        }

@@ -68,14 +68,16 @@ class SecurityScanner:
                  api_key: str = None, verbose: bool = False,
                  include_tests: bool = False, batch_size: int = None, 
                  batch_delay: float = None):
+        # 先从配置获取默认值
+        self.batch_size = batch_size or DEFAULT_CONFIG['batch_size']
+        self.batch_delay = batch_delay or DEFAULT_CONFIG['batch_delay']
+        
+        # 然后初始化其他属性
         self.mode = mode
         self.ai_provider = self._create_provider(mode, api_key) if mode != ScanMode.SEMGREP_ONLY else None
         self.semgrep_runner = SemgrepRunner()
         self.file_context = FileContext()
         self.verbose = verbose
-        self.include_tests = include_tests
-        self.batch_size = batch_size or DEFAULT_CONFIG['batch_size']
-        self.batch_delay = batch_delay or DEFAULT_CONFIG['batch_delay']
         
         # 使用配置文件中的值
         self.skip_dirs = DEFAULT_CONFIG['skip_dirs']
@@ -101,11 +103,11 @@ class SecurityScanner:
             'swift', '.swift' # Swift
         }
         
-        # 启用调试日志
+        # 设置日志级别
         if verbose:
             logging.getLogger('dragonsec').setLevel(logging.DEBUG)
-            logger.debug("Debug logging enabled")
-            logger.debug(f"Supported extensions: {self.supported_extensions}")
+        else:
+            logging.getLogger('dragonsec').setLevel(logging.WARNING)  # 只显示警告和错误
 
     def _create_provider(self, mode: ScanMode, api_key: str) -> AIProvider:
         providers = {
@@ -165,7 +167,9 @@ class SecurityScanner:
     async def scan_file(self, file_path: str) -> Dict:
         """Scan a single file"""
         try:
-            logger.info(f"Starting scan of file: {file_path}")
+            if self.verbose:
+                logger.debug(f"Starting scan of file: {file_path}")  # 改为 DEBUG 级别
+            
             results = []
             
             # 只在 SEMGREP_ONLY 模式下运行 semgrep
@@ -175,7 +179,8 @@ class SecurityScanner:
             
             # 运行 AI 分析
             if self.mode != ScanMode.SEMGREP_ONLY:
-                logger.info("Running AI analysis")
+                if self.verbose:
+                    logger.debug("Running AI analysis")  # 改为 DEBUG 级别
                 context = self.file_context.get_context(file_path)
                 with open(file_path, 'r', encoding='utf-8') as f:
                     code = f.read()
@@ -187,15 +192,17 @@ class SecurityScanner:
                 )
                 
                 if "vulnerabilities" in ai_results:
-                    logger.info(f"AI analysis completed with {len(ai_results['vulnerabilities'])} findings")
+                    if self.verbose:
+                        logger.debug(f"AI analysis completed with {len(ai_results['vulnerabilities'])} findings")
                     results.extend(ai_results["vulnerabilities"])
                 else:
-                    logger.info("AI analysis completed with no findings")
+                    if self.verbose:
+                        logger.debug("AI analysis completed with no findings")
             
             return {"vulnerabilities": results}
             
         except Exception as e:
-            logger.error(f"Error scanning file {file_path}: {e}")
+            logger.error(f"Error scanning file {file_path}: {e}")  # 错误信息保持 ERROR 级别
             return {"vulnerabilities": []}
 
     async def process_batch(self, files: List[str]) -> List[Dict]:
@@ -227,14 +234,11 @@ class SecurityScanner:
     async def scan_directory(self, directory: str, mode: str = "openai") -> Dict:
         """扫描指定目录下的所有文件"""
         try:
-            # 展开路径并获取绝对路径
-            directory = os.path.expanduser(directory)
-            directory = os.path.abspath(directory)
-            
-            # 设置扫描根目录
+            directory = os.path.abspath(os.path.expanduser(directory))
             self.file_context.set_scan_root(directory)
             
-            logger.info(f"Scanning directory: {directory}")
+            if self.verbose:
+                logger.debug(f"Scanning directory: {directory}")  # 改为 DEBUG 级别
             
             # 获取所有支持的文件
             files_to_scan = []
@@ -327,35 +331,22 @@ class SecurityScanner:
             with open(report_file, 'w', encoding='utf-8') as f:
                 json.dump(summary, f, indent=2, ensure_ascii=False)
             
-            # Print results
-            print("\n" + "="*80)
-            print(summary["summary"])
-            print(f"📝 Detailed report saved to: {report_file}")
-            print("="*80 + "\n")
-            
+            # 只在 verbose 模式下打印详细结果
             if self.verbose:
                 print("\n🔍 Detailed scan results:")
                 print(json.dumps(summary, indent=2, ensure_ascii=False))
+            else:
+                # 非 verbose 模式只打印简要信息
+                print("\n" + "="*80)
+                print(summary["summary"])
+                print(f"📝 Detailed report saved to: {report_file}")
+                print("="*80 + "\n")
             
             return summary
             
         except Exception as e:
-            logger.error(f"Error scanning directory: {e}")
-            # 出错时也返回有效的字典而不是 None
-            return {
-                "vulnerabilities": [],
-                "overall_score": 0,
-                "summary": f"Error during scan: {e}",
-                "metadata": {
-                    "scan_duration": 0,
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "mode": mode,
-                    "files_scanned": 0,
-                    "skipped_files": 0,
-                    "files_with_issues": 0,
-                    "error": str(e)
-                }
-            }
+            logger.error(f"Error scanning directory: {e}")  # 错误信息保持 ERROR 级别
+            return self._get_error_result()
 
     def _calculate_security_score(self, vulnerabilities: List[Dict]) -> float:
         """Calculate security score based on vulnerabilities"""
