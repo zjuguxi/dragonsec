@@ -10,12 +10,15 @@
 
 DragonSec is an advanced security scanner that combines traditional static analysis with AI-powered code review.
 
+[中文文档](./README_zh.md)
+
 ## Features
 
 - **Multiple AI Models Support**:
   - OpenAI GPT-4o
   - Google Gemini-1.5-flash
   - Deepseek R1 (Aliyun)
+  - xAI Grok
   - More models coming soon...
 
 - **Static Analysis**:
@@ -28,12 +31,13 @@ DragonSec is an advanced security scanner that combines traditional static analy
   - Reduces false positives through cross-validation
   - Provides comprehensive security scoring
 
+- Asynchronous parallel processing
+
 ## Installation
 
 ```bash
 pip install dragonsec
 ```
-
 ## Quick Start
 
 1. Set up your API keys:
