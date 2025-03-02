@@ -5,6 +5,8 @@ from typing import Dict, List
 import json
 from openai import AsyncOpenAI
 from .base import AIProvider  # 从 base 导入
+import os
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -137,4 +139,153 @@ class GrokProvider(AIProvider):
 
     async def deduplicate_vulnerabilities(self, vulnerabilities: List[Dict]) -> List[Dict]:
         """使用基类的去重逻辑"""
-        return await super().deduplicate_vulnerabilities(vulnerabilities) 
+        return await super().deduplicate_vulnerabilities(vulnerabilities)
+
+    def _parse_response(self, response: str, file_path: str) -> Dict:
+        """Parse response from Grok API
+        
+        Args:
+            response: Response from Grok API
+            file_path: Path to the file being analyzed
+            
+        Returns:
+            Parsed response with vulnerabilities
+        """
+        try:
+            # 提取文件名，用于设置正确的文件名
+            file_name = os.path.basename(file_path)
+            
+            # 尝试解析 JSON 响应
+            try:
+                # 查找 JSON 块
+                json_match = re.search(r'```json\s*(.*?)\s*```', response, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(1)
+                    result = json.loads(json_str)
+                    
+                    # 确保结果包含必要的字段
+                    if not isinstance(result, dict):
+                        result = {"vulnerabilities": []}
+                    
+                    if "vulnerabilities" not in result:
+                        result["vulnerabilities"] = []
+                    
+                    # 修复漏洞中的文件名和行号
+                    for vuln in result["vulnerabilities"]:
+                        # 设置正确的文件名
+                        vuln["file"] = file_name
+                        
+                        # 如果行号不存在或为默认值 1，尝试从描述中提取
+                        if "line_number" not in vuln or vuln["line_number"] == 1:
+                            # 尝试从描述中提取行号
+                            line_match = re.search(r'line\s+(\d+)', vuln.get("description", ""), re.IGNORECASE)
+                            if line_match:
+                                vuln["line_number"] = int(line_match.group(1))
+                        
+                        # 确保每个漏洞都有 source 字段
+                        vuln["source"] = "ai"
+                    
+                    # 计算整体评分
+                    if "overall_score" not in result:
+                        # 根据漏洞数量和严重程度计算评分
+                        vulns = result["vulnerabilities"]
+                        if vulns:
+                            avg_severity = sum(v.get("severity", 5) for v in vulns) / len(vulns)
+                            result["overall_score"] = max(0, 100 - (avg_severity * 10))
+                        else:
+                            result["overall_score"] = 100
+                    
+                    # 添加摘要
+                    if "summary" not in result:
+                        if result["vulnerabilities"]:
+                            result["summary"] = f"Found {len(result['vulnerabilities'])} potential security issues"
+                        else:
+                            result["summary"] = "No security issues found"
+                    
+                    return result
+            except json.JSONDecodeError:
+                logger.warning("Failed to parse JSON response")
+            
+            # 如果 JSON 解析失败，尝试文本分析
+            return self._analyze_text_response(response, file_path)
+            
+        except Exception as e:
+            logger.error(f"Error parsing response: {e}")
+            return {"vulnerabilities": [], "overall_score": 100, "summary": "Error parsing response"}
+
+    def _analyze_text_response(self, response: str, file_path: str) -> Dict:
+        """Analyze text response when JSON parsing fails
+        
+        Args:
+            response: Response from Grok API
+            file_path: Path to the file being analyzed
+            
+        Returns:
+            Analyzed response with vulnerabilities
+        """
+        # 提取文件名，用于设置正确的文件名
+        file_name = os.path.basename(file_path)
+        
+        result = {
+            "vulnerabilities": [],
+            "overall_score": 100,
+            "summary": "No security issues found"
+        }
+        
+        # 查找漏洞描述
+        vuln_patterns = [
+            r'(?i)vulnerability\s*(?:\d+)?\s*:\s*(.*?)(?:\n\n|\Z)',
+            r'(?i)issue\s*(?:\d+)?\s*:\s*(.*?)(?:\n\n|\Z)',
+            r'(?i)security\s+issue\s*(?:\d+)?\s*:\s*(.*?)(?:\n\n|\Z)',
+            r'(?i)finding\s*(?:\d+)?\s*:\s*(.*?)(?:\n\n|\Z)'
+        ]
+        
+        # 跟踪已处理的漏洞类型，避免重复
+        processed_types = set()
+        
+        for pattern in vuln_patterns:
+            for match in re.finditer(pattern, response, re.DOTALL):
+                description = match.group(1).strip()
+                
+                # 尝试确定漏洞类型
+                type_match = re.search(r'(?i)(sql\s+injection|xss|csrf|command\s+injection|path\s+traversal|insecure\s+deserialization|hardcoded\s+credentials|sensitive\s+data\s+exposure)', description)
+                detected_type = type_match.group(1).lower().replace(' ', '-') if type_match else "security-issue"
+                
+                # 避免重复添加相同类型的漏洞
+                if detected_type in processed_types:
+                    continue
+                
+                # 尝试从描述中提取行号
+                line_match = re.search(r'line\s+(\d+)', description, re.IGNORECASE)
+                line_number = int(line_match.group(1)) if line_match else 1
+                
+                # 尝试确定严重程度
+                severity = 5  # 默认中等严重程度
+                if re.search(r'(?i)critical|severe|high\s+risk|high\s+severity', description):
+                    severity = 9
+                elif re.search(r'(?i)medium|moderate', description):
+                    severity = 5
+                elif re.search(r'(?i)low|minor', description):
+                    severity = 3
+                
+                # 创建漏洞对象
+                vuln = {
+                    "type": detected_type,
+                    "severity": severity,
+                    "description": description,
+                    "line_number": line_number,
+                    "file": file_name,  # 使用正确的文件名
+                    "source": "ai"
+                }
+                
+                # 添加漏洞
+                result["vulnerabilities"].append(vuln)
+                processed_types.add(detected_type)
+        
+        # 更新分数和摘要
+        if result["vulnerabilities"]:
+            avg_severity = sum(v["severity"] for v in result["vulnerabilities"]) / len(result["vulnerabilities"])
+            result["overall_score"] = max(0, 100 - (avg_severity * 10))
+            result["summary"] = f"Found {len(result['vulnerabilities'])} potential issues through text analysis"
+        
+        return result 

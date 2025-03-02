@@ -3,6 +3,7 @@ from typing import Dict, Any, List
 import logging
 import json
 import os
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -364,3 +365,160 @@ class AIProvider(ABC):
         
         Adjust severity and reporting based on category.
         """ 
+
+    async def filter_false_positives(self, scan_result: Dict, file_contents: Dict = None) -> Dict:
+        """Filter false positives from scan results
+        
+        Args:
+            scan_result: The complete scan result with vulnerabilities
+            file_contents: Optional dict mapping file paths to their contents
+            
+        Returns:
+            Filtered scan result
+        """
+        try:
+            # 如果没有漏洞，直接返回
+            if not scan_result.get("vulnerabilities"):
+                return scan_result
+            
+            # 构建提示
+            prompt = self._build_filter_prompt(scan_result, file_contents)
+            
+            # 调用 API
+            response = await self._call_api(prompt)
+            
+            # 解析响应
+            try:
+                # 查找 JSON 块
+                json_match = re.search(r'```json\s*(.*?)\s*```', response, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(1)
+                    # 修复常见的 JSON 格式问题
+                    json_str = self._fix_json_format(json_str)
+                    try:
+                        filtered_result = json.loads(json_str)
+                        
+                        # 验证结果格式
+                        if "vulnerabilities" in filtered_result and isinstance(filtered_result["vulnerabilities"], list):
+                            # 更新分数和摘要
+                            vulns = filtered_result["vulnerabilities"]
+                            if vulns:
+                                avg_severity = sum(v.get("severity", 5) for v in vulns) / len(vulns)
+                                filtered_result["overall_score"] = self._calculate_security_score(vulns)
+                                filtered_result["summary"] = f"Found {len(vulns)} potential issues after filtering false positives"
+                            else:
+                                filtered_result["overall_score"] = 100
+                                filtered_result["summary"] = "No security issues found after filtering false positives"
+                            
+                            # 保留原始元数据
+                            if "metadata" in scan_result:
+                                filtered_result["metadata"] = scan_result["metadata"]
+                                # 添加过滤信息
+                                filtered_result["metadata"]["filtered"] = True
+                                filtered_result["metadata"]["original_vulnerabilities"] = len(scan_result.get("vulnerabilities", []))
+                                filtered_result["metadata"]["filtered_vulnerabilities"] = len(vulns)
+                            
+                            return filtered_result
+                    except json.JSONDecodeError:
+                        logger.error("Failed to parse filtered result JSON")
+            except Exception as e:
+                logger.error(f"Error parsing filter response: {e}")
+            
+            # 如果解析失败，返回原始结果
+            return scan_result
+            
+        except Exception as e:
+            logger.error(f"Error filtering false positives: {e}")
+            return scan_result
+
+    def _build_filter_prompt(self, scan_result: Dict, file_contents: Dict = None) -> str:
+        """Build prompt for filtering false positives
+        
+        Args:
+            scan_result: The complete scan result with vulnerabilities
+            file_contents: Optional dict mapping file paths to their contents
+            
+        Returns:
+            Prompt for filtering false positives
+        """
+        # 获取漏洞列表
+        vulnerabilities = scan_result.get("vulnerabilities", [])
+        
+        # 构建提示
+        prompt = f"""You are a security expert reviewing scan results for false positives. 
+I have a security scan result with {len(vulnerabilities)} potential vulnerabilities.
+Please review each vulnerability and determine if it's a real issue or a false positive.
+
+IMPORTANT: Your response MUST be in English only. Do not use any other language.
+
+Here are the vulnerabilities:
+
+"""
+        
+        # 添加每个漏洞的详细信息
+        for i, vuln in enumerate(vulnerabilities):
+            prompt += f"Vulnerability #{i+1}:\n"
+            prompt += f"Type: {vuln.get('type', 'Unknown')}\n"
+            prompt += f"Severity: {vuln.get('severity', 'Unknown')}\n"
+            prompt += f"File: {vuln.get('file', 'Unknown')}\n"
+            prompt += f"Line: {vuln.get('line_number', 'Unknown')}\n"
+            prompt += f"Description: {vuln.get('description', 'Unknown')}\n"
+            prompt += f"Risk Analysis: {vuln.get('risk_analysis', 'Unknown')}\n"
+            prompt += f"Recommendation: {vuln.get('recommendation', 'Unknown')}\n\n"
+        
+        # 如果有文件内容，添加相关文件的内容
+        if file_contents:
+            prompt += "Here are the relevant file contents:\n\n"
+            
+            # 获取漏洞中提到的所有文件
+            vuln_files = set()
+            for vuln in vulnerabilities:
+                file_path = vuln.get('file')
+                if file_path and file_path in file_contents:
+                    vuln_files.add(file_path)
+            
+            # 添加每个文件的内容
+            for file_path in vuln_files:
+                prompt += f"File: {file_path}\n```\n{file_contents[file_path]}\n```\n\n"
+        
+        # 添加指导
+        prompt += """Please analyze each vulnerability and determine if it's a real issue or a false positive.
+Common reasons for false positives include:
+1. Security terms mentioned in comments, strings, or variable names
+2. Code that looks similar to vulnerable patterns but is actually secure
+3. Test code or example code that is not actually used in production
+4. Misinterpretation of code functionality
+
+Return a JSON object with only the real vulnerabilities (remove false positives):
+
+```json
+{
+  "vulnerabilities": [
+    // Only include real vulnerabilities here, remove false positives
+  ]
+}
+```
+
+If all vulnerabilities are false positives, return an empty array for "vulnerabilities".
+Remember: Your response MUST be in English only.
+"""
+        
+        return prompt
+
+    def _fix_json_format(self, json_str: str) -> str:
+        """Fix common JSON format issues"""
+        # 修复缺少引号的键
+        json_str = re.sub(r'([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:', r'\1"\2":', json_str)
+        
+        # 修复单引号
+        json_str = json_str.replace("'", '"')
+        
+        # 修复尾部逗号
+        json_str = re.sub(r',\s*}', '}', json_str)
+        json_str = re.sub(r',\s*]', ']', json_str)
+        
+        # 修复缺少值的情况
+        json_str = re.sub(r':\s*,', ': null,', json_str)
+        json_str = re.sub(r':\s*}', ': null}', json_str)
+        
+        return json_str

@@ -1,29 +1,57 @@
-from dragonsec.core.scanner import main
 import argparse
+import sys
+import asyncio
 import os
 import logging
+from dragonsec.core.scanner import SecurityScanner, ScanMode
 
 def main():
-    parser = argparse.ArgumentParser()
-    # ... 其他参数 ...
-    parser.add_argument('--verbose', '-v', action='store_true', help='Enable verbose output')
+    """Main entry point for the dragonsec command line tool"""
+    parser = argparse.ArgumentParser(description='DragonSec Security Scanner')
+    subparsers = parser.add_subparsers(dest='command', help='Command to run')
+    
+    # Add scan command
+    scan_parser = subparsers.add_parser('scan', help='Scan code for security issues')
+    SecurityScanner.add_arguments(scan_parser)
+    
+    # Add rules command (placeholder)
+    rules_parser = subparsers.add_parser('rules', help='Manage security rules')
+    rules_parser.add_argument('--list', action='store_true', help='List available rules')
+    
+    # Parse arguments
     args = parser.parse_args()
-
-    # 配置日志级别
+    
+    # Configure logging
     log_level = os.getenv('DRAGONSEC_LOG_LEVEL', 'WARNING')
-    if args.verbose:
+    if hasattr(args, 'verbose') and args.verbose:
         log_level = 'DEBUG'
     
-    # 配置根日志器
+    # Configure root logger
     logging.basicConfig(
         level=log_level,
-        format='%(message)s'  # 简化非 verbose 模式的输出格式
+        format='%(message)s'  # Simplified format for non-verbose mode
     )
     
-    # 在非 verbose 模式下抑制特定模块的日志
-    if not args.verbose:
+    # Suppress logs from specific modules in non-verbose mode
+    if log_level != 'DEBUG':
         logging.getLogger('httpx').setLevel(logging.WARNING)
         logging.getLogger('openai').setLevel(logging.WARNING)
+    
+    # Execute command
+    if args.command == 'scan':
+        try:
+            asyncio.run(SecurityScanner._async_main())
+        except KeyboardInterrupt:
+            print("\nScan interrupted by user")
+            sys.exit(1)
+    elif args.command == 'rules':
+        if args.list:
+            print("Available security rules:")
+            # TODO: Implement rule listing
+            print("  (Rule listing not yet implemented)")
+    else:
+        parser.print_help()
+        sys.exit(1)
 
 if __name__ == '__main__':
     main() 
