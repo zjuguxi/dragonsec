@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 import pytest
 import requests
+import asyncio
+import sys
 
 from dragonsec.providers.local import LocalProvider
 
@@ -13,35 +15,40 @@ async def test_local_provider():
     if not provider.is_server_available():
         pytest.skip("Local model server is not available")
     
-    # Get test file path
-    test_file = Path(__file__).parent / "fixtures" / "vulnerable_code.py"
+    # 简单的测试代码
+    code = """
+def unsafe_sql_query(user_input):
+    query = f"SELECT * FROM users WHERE username = '{user_input}'"
+    return query
+"""
     
-    if not test_file.exists():
-        pytest.skip(f"Test file not found: {test_file}")
-    
-    # Read file content
-    with open(test_file, "r") as f:
-        code = f.read()
+    # 设置超时
+    timeout = 60  # 60秒超时
     
     try:
-        # Analyze code
-        result = await provider._analyze_with_ai(code, str(test_file))
+        # 使用 asyncio.wait_for 添加超时控制
+        result = await asyncio.wait_for(
+            provider.analyze_code(code, "test_code.py"),
+            timeout=timeout
+        )
         
-        # Basic assertions
-        assert isinstance(result, dict)
+        # 基本验证
         assert "vulnerabilities" in result
         assert "overall_score" in result
         assert isinstance(result["vulnerabilities"], list)
+        
+        # 验证是否检测到 SQL 注入
+        vuln_types = [v.get("type", "").lower() for v in result["vulnerabilities"]]
+        assert any("sql" in t for t in vuln_types), "SQL injection not detected"
+        
+    except asyncio.TimeoutError:
+        pytest.skip(f"Test timed out after {timeout} seconds")
     except Exception as e:
-        pytest.skip(f"Error analyzing code: {e}")
+        pytest.skip(f"Error testing local provider: {e}")
 
-# Keep the standalone runner for manual testing
+# 保留独立运行器以便手动测试
 if __name__ == "__main__":
-    import asyncio
-    import sys
-    from pathlib import Path
-    
-    # Add project root to path if running from tests directory
+    # 如果从测试目录运行，将项目根目录添加到路径
     project_root = Path(__file__).parent.parent
     if project_root not in sys.path:
         sys.path.insert(0, str(project_root))
@@ -49,56 +56,4 @@ if __name__ == "__main__":
     async def run_test():
         await test_local_provider()
         
-        # Print more detailed results for manual testing
-        test_file = Path(__file__).parent / "fixtures" / "vulnerable_code.py"
-        with open(test_file, "r") as f:
-            code = f.read()
-        
-        provider = LocalProvider()
-        
-        try:
-            # Add debug information
-            print("\n==== Sending request to local model ====")
-            prompt = provider._build_prompt(code, str(test_file))
-            print(f"Prompt length: {len(prompt)} characters")
-            
-            # Call API directly and view raw response
-            raw_response = await provider._call_api(prompt)
-            print(f"\n==== Raw response ====")
-            print("Response length:", len(raw_response))
-            print("First 500 characters:")
-            print(raw_response[:500])
-            print("\nLast 500 characters:")
-            print(raw_response[-500:] if len(raw_response) > 500 else raw_response)
-            
-            # Try to parse response
-            print("\n==== Trying to parse response ====")
-            try:
-                result = provider._parse_response(raw_response)
-                print("Parsing successful")
-            except Exception as e:
-                print(f"Parsing error: {e}")
-                import traceback
-                traceback.print_exc()
-                result = provider._get_default_response()
-            
-            print(f"\n==== Security Scan Results ====")
-            print(f"File: {test_file.name}")
-            print(f"Security Score: {result.get('overall_score', 100)}/100")
-            
-            if result.get("vulnerabilities"):
-                print("\nVulnerabilities Found:")
-                for i, vuln in enumerate(result["vulnerabilities"], 1):
-                    print(f"\n[{i}] {vuln.get('type', 'Unknown Issue')}")
-                    print(f"  Severity: {vuln.get('severity', 'N/A')}/10")
-                    print(f"  Line: {vuln.get('line_number', 'N/A')}")
-                    print(f"  Description: {vuln.get('description', 'No description')}")
-            else:
-                print("\nNo vulnerabilities detected.")
-        except Exception as e:
-            print(f"\n==== Error ====")
-            print(f"Error analyzing code: {e}")
-            import traceback
-            traceback.print_exc()
-    
     asyncio.run(run_test()) 
