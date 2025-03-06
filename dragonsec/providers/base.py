@@ -430,7 +430,6 @@ class AIProvider(ABC):
         except Exception as e:
             logger.error(f"Error filtering false positives: {e}")
             return scan_result
-
     def _build_filter_prompt(self, scan_result: Dict, file_contents: Dict = None) -> str:
         """Build prompt for filtering false positives
         

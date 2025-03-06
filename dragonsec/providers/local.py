@@ -756,8 +756,7 @@ If no vulnerabilities are found, return an empty array for "vulnerabilities" and
             "vulnerabilities": [],
             "overall_score": 100,
             "summary": "Failed to parse model response"
-        }
-    
+        }    
     async def _analyze_with_ai(self, code: str, file_path: str, context: Dict = None) -> Dict:
         """Analyze code with AI (abstract method implementation)"""
         try:
