@@ -1,7 +1,7 @@
-# 自动检测文本文件并执行行尾符转换
+# Auto detect text files and perform line ending conversion
 * text=auto
 
-# 源代码文件
+# Source code
 *.py text
 *.js text
 *.java text
@@ -19,7 +19,7 @@
 *.md text
 *.txt text
 
-# 文档
+# Documentation
 *.pdf binary
 *.doc binary
 *.docx binary
@@ -28,19 +28,19 @@
 *.ppt binary
 *.pptx binary
 
-# 图片
+# Images
 *.png binary
 *.jpg binary
 *.gif binary
 *.ico binary
 
-# 字体
+# Fonts
 *.ttf binary
 *.eot binary
 *.woff binary
 *.woff2 binary
 
-# 其他
+# Others
 *.zip binary
 *.tar binary
 *.gz binary 
