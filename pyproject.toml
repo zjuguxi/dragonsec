@@ -14,24 +14,19 @@ authors = [
 ]
 dependencies = [
     # AI Providers
-    "openai>=1.0.0",
-    "google-generativeai>=0.3.0",
-    "deepseek-ai>=0.1.0",
-    "grok>=0.1.0",
+    "openai",
+    "google-generativeai",
     
     # Security Scanning
-    "semgrep>=1.0.0",
+    "semgrep",
     
     # Async Support
-    "aiohttp>=3.9.1",
+    "aiohttp",
     
     # Utilities
     "python-dotenv",
     "requests",
     "pyyaml",
-    
-    # Database
-    "sqlite3-api",
 ]
 
 [project.optional-dependencies]
