@@ -16,6 +16,7 @@ class FileContext:
         self._scan_root = None
         self._allowed_paths = set()
         self._imports = []  # 添加导入列表
+        self.content = ""  # 添加内容属性
         
         if file_path:
             try:
@@ -30,11 +31,21 @@ class FileContext:
                 self.set_scan_root(str(Path(self.file_path).parent))
                 # 添加文件所在目录到允许列表
                 self.add_allowed_path(str(Path(self.file_path).parent))
+                
+                # 读取文件内容
+                try:
+                    with open(self.file_path, 'r', encoding='utf-8') as f:
+                        self.content = f.read()
+                except Exception as e:
+                    logger.warning(f"Error reading file content: {e}")
+                    self.content = ""
+                    
             except Exception as e:
                 logger.warning(f"Error initializing FileContext with path {file_path}: {e}")
                 # 如果出错，使用当前目录作为根目录
                 self.set_scan_root(str(Path.cwd()))
                 self.file_path = file_path
+                self.content = ""
 
     def set_scan_root(self, path: str) -> None:
         """设置扫描根目录"""
@@ -216,16 +227,23 @@ class FileContext:
             path = Path(file_path).resolve()
             scan_root = self._get_scan_root()
             
-            # 不再检查是否在项目目录内，而是使用扫描根目录
-            file_name = path.stem
+            # 获取文件内容
+            content = path.read_text(encoding='utf-8')
+            
+            # 分析导入语句
+            imports = self.analyze_imports(content)
             related = []
             
-            # 只在扫描根目录下查找相关文件
-            for ext in ['.py', '.js', '.ts', '.java', '.go', '.php']:
-                for p in scan_root.rglob(f"*{file_name}*{ext}"):
-                    if p.is_file() and p != path:
-                        related.append(str(p))
-                        
+            # 查找导入的模块文件
+            for imp in imports:
+                # 移除可能的相对导入前缀
+                imp = imp.replace('.', '').replace('/', '')
+                for ext in ['.py', '.js', '.ts', '.java', '.go', '.php']:
+                    pattern = f"{imp}{ext}"
+                    for p in scan_root.rglob(pattern):
+                        if p.is_file() and p != path:
+                            related.append(str(p))
+                            
             return related[:5]  # 限制返回数量
         except Exception as e:
             logger.error(f"Error finding related files: {e}")
