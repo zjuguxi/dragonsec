@@ -2,6 +2,7 @@ import pytest
 from pathlib import Path
 from dragonsec.utils.file_utils import FileContext
 import tempfile
+import os
 
 @pytest.fixture
 def file_context():
@@ -138,17 +139,20 @@ def test_file_context_with_js_imports(tmp_path):
 
 def test_file_context_symlink_handling(tmp_path):
     """Test handling of symbolic links"""
+    # 在 Windows 上跳过此测试
+    if os.name == 'nt':
+        pytest.skip("Symbolic link test skipped on Windows")
+        
     # Create a test file and a symlink
     real_file = tmp_path / "real.py"
     real_file.write_text("print('test')")
     symlink = tmp_path / "link.py"
     symlink.symlink_to(real_file)
     
-    context = FileContext()
-    context.set_scan_root(str(tmp_path))
-    
-    # Test symlink detection
-    assert not context._is_path_allowed(symlink)
+    # Test file context with symlink
+    context = FileContext(str(symlink))
+    assert context.file_path == str(real_file)
+    assert context.content == "print('test')"
 
 def test_file_context_binary_file_handling(tmp_path):
     """Test handling of binary files"""

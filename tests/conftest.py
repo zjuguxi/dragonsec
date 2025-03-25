@@ -2,6 +2,36 @@ import pytest
 import os
 import json
 from pathlib import Path
+from dotenv import load_dotenv
+from unittest.mock import MagicMock
+
+# 加载测试环境变量
+load_dotenv('.env.test')
+
+@pytest.fixture(autouse=True)
+def setup_test_env():
+    """设置测试环境变量"""
+    # 确保测试目录存在
+    test_dir = Path(__file__).parent / "test_files"
+    test_dir.mkdir(parents=True, exist_ok=True)
+    
+    # 设置环境变量
+    os.environ["TEST_MODE"] = "true"
+    os.environ["TEST_FILES_DIR"] = str(test_dir)
+    os.environ["OPENAI_API_KEY"] = "test-key"
+    os.environ["GEMINI_API_KEY"] = "test-key"
+    os.environ["DEEPSEEK_API_KEY"] = "test-key"
+    os.environ["GROK_API_KEY"] = "test-key"
+    
+    yield
+    
+    # 清理环境变量
+    os.environ.pop("TEST_MODE", None)
+    os.environ.pop("TEST_FILES_DIR", None)
+    os.environ.pop("OPENAI_API_KEY", None)
+    os.environ.pop("GEMINI_API_KEY", None)
+    os.environ.pop("DEEPSEEK_API_KEY", None)
+    os.environ.pop("GROK_API_KEY", None)
 
 @pytest.fixture
 def test_cache():

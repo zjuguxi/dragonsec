@@ -92,30 +92,47 @@ async def test_scan_empty_directory():
     finally:
         shutil.rmtree(empty_dir)
 
+@patch('dragonsec.providers.openai.OpenAIProvider.analyze_code')
 @pytest.mark.asyncio
-async def test_scan_with_ai():
+async def test_scan_with_ai(mock_analyze, sample_file_path, mock_ai_results):
     """Test scanning with AI enabled"""
+    # 使用 mock_ai_results fixture
+    mock_analyze.return_value = {
+        "vulnerabilities": mock_ai_results,
+        "overall_score": 50,
+        "summary": "Found security issues"
+    }
+    
     scanner = SecurityScanner(
         mode=ScanMode.OPENAI,
-        api_key="test_key",
+        api_key="test-key",
         batch_size=2,
         batch_delay=0.1
     )
     
-    test_file = Path(__file__).parent / "fixtures" / "test.py"
-    test_file.write_text("""
-def insecure_function(user_input):
-    query = f"SELECT * FROM users WHERE id = {user_input}"
-    return query
-""")
-    
     try:
-        results = await scanner.scan_file(str(test_file))
+        results = await scanner.scan_file(str(sample_file_path))
+        
+        # 验证基本结构
         assert "vulnerabilities" in results
+        assert "overall_score" in results
+        assert "summary" in results
+        
+        # 验证漏洞信息
         vulns = results["vulnerabilities"]
+        assert len(vulns) > 0
         assert any(v["source"] == "ai" for v in vulns)
-    finally:
-        test_file.unlink(missing_ok=True)
+        
+        # 验证分数计算
+        assert 0 <= results["overall_score"] <= 100
+        
+        # 验证元数据
+        assert "metadata" in results
+        assert "scan_duration" in results["metadata"]
+        assert "files_scanned" in results["metadata"]
+        
+    except Exception as e:
+        pytest.fail(f"Test failed: {e}")
 
 @pytest.mark.asyncio
 async def test_scan_directory(sample_project_path):

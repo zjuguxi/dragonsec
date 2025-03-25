@@ -4,6 +4,7 @@ import logging
 import json
 import os
 import re
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -521,3 +522,141 @@ Remember: Your response MUST be in English only.
         json_str = re.sub(r':\s*}', ': null}', json_str)
         
         return json_str
+
+    async def deep_audit_vulnerabilities(self, scan_result: Dict, file_contents: Dict = None) -> Dict:
+        """Deep audit of vulnerabilities for detailed analysis
+        
+        Args:
+            scan_result: The scan result with confirmed vulnerabilities
+            file_contents: Optional dict mapping file paths to their contents
+            
+        Returns:
+            Dict with detailed vulnerability analysis
+        """
+        try:
+            # 如果没有漏洞，直接返回
+            if not scan_result.get("vulnerabilities"):
+                return scan_result
+            
+            # 构建提示
+            prompt = self._build_deep_audit_prompt(scan_result, file_contents)
+            
+            # 调用 API
+            response = await self._call_api(prompt)
+            
+            # 解析响应
+            try:
+                # 查找 JSON 块
+                json_match = re.search(r'```json\s*(.*?)\s*```', response, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(1)
+                    # 修复常见的 JSON 格式问题
+                    json_str = self._fix_json_format(json_str)
+                    try:
+                        audit_result = json.loads(json_str)
+                        
+                        # 验证结果格式
+                        if "vulnerabilities" in audit_result and isinstance(audit_result["vulnerabilities"], list):
+                            # 更新漏洞详细信息
+                            scan_result["vulnerabilities"] = audit_result["vulnerabilities"]
+                            
+                            # 添加深度分析元数据
+                            if "metadata" not in scan_result:
+                                scan_result["metadata"] = {}
+                            scan_result["metadata"]["deep_audited"] = True
+                            scan_result["metadata"]["audit_timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                            
+                            return scan_result
+                    except json.JSONDecodeError:
+                        logger.error("Failed to parse deep audit result JSON")
+            except Exception as e:
+                logger.error(f"Error parsing deep audit response: {e}")
+            
+            # 如果解析失败，返回原始结果
+            return scan_result
+            
+        except Exception as e:
+            logger.error(f"Error in deep audit: {e}")
+            return scan_result
+
+    def _build_deep_audit_prompt(self, scan_result: Dict, file_contents: Dict = None) -> str:
+        """Build prompt for deep vulnerability audit
+        
+        Args:
+            scan_result: The scan result with confirmed vulnerabilities
+            file_contents: Optional dict mapping file paths to their contents
+            
+        Returns:
+            Prompt for deep vulnerability audit
+        """
+        # 获取漏洞列表
+        vulnerabilities = scan_result.get("vulnerabilities", [])
+        
+        # 构建提示
+        prompt = f"""You are a senior security expert performing a deep analysis of confirmed vulnerabilities.
+I have {len(vulnerabilities)} confirmed security vulnerabilities that need detailed analysis.
+
+For each vulnerability, provide a comprehensive analysis including:
+1. Exploit Difficulty (1-10, where 10 is most difficult)
+2. Business Impact (Critical/High/Medium/Low)
+3. Fix Priority (P0/P1/P2/P3)
+4. Required Attack Prerequisites
+5. Potential Attack Scenarios
+6. Detailed Fix Recommendations
+7. Security Best Practices
+8. Similar Vulnerability Prevention
+
+Here are the vulnerabilities:
+
+"""
+        
+        # 添加每个漏洞的详细信息
+        for i, vuln in enumerate(vulnerabilities):
+            prompt += f"\nVulnerability #{i+1}:\n"
+            prompt += f"Type: {vuln.get('type', 'Unknown')}\n"
+            prompt += f"Severity: {vuln.get('severity', 'Unknown')}\n"
+            prompt += f"File: {vuln.get('file', 'Unknown')}\n"
+            prompt += f"Line: {vuln.get('line_number', 'Unknown')}\n"
+            prompt += f"Description: {vuln.get('description', 'Unknown')}\n"
+            
+            # 如果有文件内容，添加相关代码片段
+            file_path = vuln.get('file')
+            if file_contents and file_path in file_contents:
+                line_number = vuln.get('line_number', 0)
+                if line_number > 0:
+                    lines = file_contents[file_path].splitlines()
+                    start_line = max(0, line_number - 5)
+                    end_line = min(len(lines), line_number + 5)
+                    code_context = '\n'.join(lines[start_line:end_line])
+                    prompt += f"\nRelevant Code Context:\n```\n{code_context}\n```\n"
+        
+        # 添加响应格式指导
+        prompt += """
+Please analyze each vulnerability and provide detailed information in the following JSON format:
+
+```json
+{
+  "vulnerabilities": [
+    {
+      "type": "original-type",
+      "severity": original-severity,
+      "file": "original-file",
+      "line_number": original-line-number,
+      "description": "original-description",
+      "exploit_difficulty": 1-10,
+      "business_impact": "Critical/High/Medium/Low",
+      "fix_priority": "P0/P1/P2/P3",
+      "attack_prerequisites": "detailed prerequisites",
+      "attack_scenarios": ["scenario1", "scenario2"],
+      "detailed_fix": "step by step fix guide",
+      "best_practices": ["practice1", "practice2"],
+      "prevention_tips": ["tip1", "tip2"]
+    }
+  ]
+}
+```
+
+Focus on providing actionable insights and practical recommendations.
+"""
+        
+        return prompt

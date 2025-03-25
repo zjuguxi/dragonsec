@@ -704,6 +704,25 @@ class SecurityScanner:
                     summary = filtered_summary
                     
                     logger.info(f"Filtered false positives: {summary['metadata'].get('original_vulnerabilities', 0)} -> {summary['metadata'].get('filtered_vulnerabilities', len(summary.get('vulnerabilities', [])))}")
+                    
+                    # 对过滤后的结果进行深度分析
+                    if self.ai_provider and hasattr(self.ai_provider, 'deep_audit_vulnerabilities'):
+                        try:
+                            logger.info("Performing deep vulnerability audit...")
+                            
+                            # 深度分析
+                            audited_summary = await self.ai_provider.deep_audit_vulnerabilities(summary, file_contents)
+                            
+                            # 使用深度分析结果
+                            summary = audited_summary
+                            
+                            logger.info("Deep audit completed")
+                            if "metadata" in summary and summary["metadata"].get("deep_audited"):
+                                logger.info(f"Audit timestamp: {summary['metadata'].get('audit_timestamp')}")
+                        except Exception as e:
+                            logger.error(f"Error in deep audit: {e}")
+                            # 如果深度分析失败，继续使用过滤后的结果
+                
                 except Exception as e:
                     logger.error(f"Error filtering false positives: {e}")
                     # 如果过滤失败，继续使用原始结果

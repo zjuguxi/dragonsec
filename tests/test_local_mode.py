@@ -4,8 +4,10 @@ import pytest
 import requests
 import asyncio
 import sys
+import os
 
 from dragonsec.providers.local import LocalProvider
+from dragonsec.providers.openai import OpenAIProvider
 
 @pytest.mark.asyncio
 async def test_local_provider():
@@ -13,7 +15,10 @@ async def test_local_provider():
     # 检查 Ollama 服务器是否可用
     provider = LocalProvider(model="deepseek-r1:1.5b")
     if not provider.is_server_available():
-        pytest.skip("Local model server is not available")
+        # 如果本地服务器不可用，使用 OpenAI 作为备选
+        if not os.getenv("OPENAI_API_KEY"):
+            pytest.skip("Neither local model server nor OpenAI API key is available")
+        provider = OpenAIProvider(api_key=os.getenv("OPENAI_API_KEY"))
     
     # 简单的测试代码
     code = """
@@ -44,7 +49,7 @@ def unsafe_sql_query(user_input):
     except asyncio.TimeoutError:
         pytest.skip(f"Test timed out after {timeout} seconds")
     except Exception as e:
-        pytest.skip(f"Error testing local provider: {e}")
+        pytest.skip(f"Error testing provider: {e}")
 
 # 保留独立运行器以便手动测试
 if __name__ == "__main__":
