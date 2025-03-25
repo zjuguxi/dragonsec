@@ -11,11 +11,19 @@ logger = logging.getLogger(__name__)
 class FileContext:
     """File context manager for security scanning"""
     
-    def __init__(self):
+    def __init__(self, file_path: str = None):
         self.root_indicators = {'.git', 'package.json', 'setup.py', 'pom.xml', 'build.gradle'}
         self._scan_root = None
         self._allowed_paths = set()
         self._imports = []  # 添加导入列表
+        self.file_path = file_path  # 添加文件路径属性
+        
+        if file_path:
+            # 如果提供了文件路径，设置扫描根目录
+            path = Path(file_path).resolve()
+            self.set_scan_root(str(path.parent))
+            # 添加文件所在目录到允许列表
+            self.add_allowed_path(str(path.parent))
 
     def set_scan_root(self, path: str) -> None:
         """设置扫描根目录"""
