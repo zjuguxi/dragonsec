@@ -11,19 +11,30 @@ logger = logging.getLogger(__name__)
 class FileContext:
     """File context manager for security scanning"""
     
-    def __init__(self, file_path: str = None):
+    def __init__(self, file_path: Optional[str] = None):
         self.root_indicators = {'.git', 'package.json', 'setup.py', 'pom.xml', 'build.gradle'}
         self._scan_root = None
         self._allowed_paths = set()
         self._imports = []  # 添加导入列表
-        self.file_path = file_path  # 添加文件路径属性
         
         if file_path:
-            # 如果提供了文件路径，设置扫描根目录
-            path = Path(file_path).resolve()
-            self.set_scan_root(str(path.parent))
-            # 添加文件所在目录到允许列表
-            self.add_allowed_path(str(path.parent))
+            try:
+                # 解析文件路径，如果是符号链接则获取真实路径
+                path = Path(file_path)
+                if path.is_symlink():
+                    self.file_path = str(path.resolve())  # 保存真实文件路径
+                else:
+                    self.file_path = str(path)
+                
+                # 设置扫描根目录
+                self.set_scan_root(str(Path(self.file_path).parent))
+                # 添加文件所在目录到允许列表
+                self.add_allowed_path(str(Path(self.file_path).parent))
+            except Exception as e:
+                logger.warning(f"Error initializing FileContext with path {file_path}: {e}")
+                # 如果出错，使用当前目录作为根目录
+                self.set_scan_root(str(Path.cwd()))
+                self.file_path = file_path
 
     def set_scan_root(self, path: str) -> None:
         """设置扫描根目录"""
