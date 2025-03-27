@@ -5,6 +5,9 @@ import tempfile
 import os
 import json
 from typing import List
+import logging
+
+logger = logging.getLogger(__name__)
 
 @pytest.fixture
 def file_context():
@@ -336,3 +339,7 @@ def find_related_files(self, file_path: str) -> List[str]:
                     related.append(str(p))
 
         return related[:5]  # Limit return count
+    except Exception as e:
+        logger.error(f"Error finding related files: {e}")
+        return []
+
