@@ -1,1 +1,1 @@
-"""AI providers for DragonSec scanner""" 
+"""AI providers for DragonSec scanner"""

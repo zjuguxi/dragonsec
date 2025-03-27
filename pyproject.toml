@@ -16,13 +16,13 @@ dependencies = [
     # AI Providers
     "openai",
     "google-generativeai",
-    
+
     # Security Scanning
     "semgrep",
-    
+
     # Async Support
     "aiohttp",
-    
+
     # Utilities
     "python-dotenv",
     "requests",
@@ -64,4 +64,4 @@ exclude_lines = [
     "raise ImportError",
 ]
 ignore_errors = true
-omit = ["tests/*"] 
+omit = ["tests/*"]

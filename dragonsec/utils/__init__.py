@@ -3,4 +3,4 @@
 from .semgrep import SemgrepRunner
 from .file_utils import FileContext
 
-__all__ = ['SemgrepRunner', 'FileContext'] 
+__all__ = ["SemgrepRunner", "FileContext"]

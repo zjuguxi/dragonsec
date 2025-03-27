@@ -4,7 +4,7 @@
 
 [![codecov](https://codecov.io/gh/zjuguxi/dragonsec/branch/main/graph/badge.svg)](https://codecov.io/gh/zjuguxi/dragonsec)
 ![Python Version](https://img.shields.io/badge/python-3.9%2B-blue)
-![License](https://img.shields.io/badge/license-Apache%202-green)  
+![License](https://img.shields.io/badge/license-Apache%202-green)
 
 <!-- END BADGIE TIME -->
 
@@ -126,7 +126,7 @@ Required:
 
 Scan Mode:
   --mode MODE              Scanning mode [default: semgrep]
-                          Choices: 
+                          Choices:
                           - semgrep (basic static analysis)
                           - openai (OpenAI enhanced)
                           - gemini (Google Gemini enhanced)

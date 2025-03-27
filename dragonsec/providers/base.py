@@ -8,13 +8,20 @@ import time
 
 logger = logging.getLogger(__name__)
 
+
 class AIProvider(ABC):
     """Base class for AI providers with common security analysis logic"""
-    
+
     def __init__(self, api_key: str):
         self.required_fields = [
-            "type", "severity", "description", "line_number", 
-            "file", "risk_analysis", "recommendation", "confidence"
+            "type",
+            "severity",
+            "description",
+            "line_number",
+            "file",
+            "risk_analysis",
+            "recommendation",
+            "confidence",
         ]
         self.api_key = self._secure_api_key(api_key)
         self.test_indicators = [
@@ -25,7 +32,7 @@ class AIProvider(ABC):
             "test_.py",
             "tests.py",
             "/fixtures/",
-            "/conftest.py"
+            "/conftest.py",
         ]
         self.base_system_prompt = """
         You are a security expert. Analyze the code for security vulnerabilities.
@@ -38,7 +45,7 @@ class AIProvider(ABC):
         6. Authentication Bypass
         7. Direct Object References (IDOR)
         8. Hardcoded Production Credentials (like API keys, passwords)
-        
+
         DO NOT report:
         - Dependencies or version issues
         - Logging concerns
@@ -52,13 +59,13 @@ class AIProvider(ABC):
         - Example code
         - Demo applications
         - Benchmark scripts
-        
+
         Context awareness:
         - Performance/benchmark scripts are not production code
         - Test scripts are not security issues
         - Trading strategy logic is not a security concern
         - Example code is not production code
-        
+
         Context awareness for deserialization:
         NEVER report pickle usage in these scenarios (no exceptions):
         1. Data tooling:
@@ -96,17 +103,17 @@ class AIProvider(ABC):
            - No access controls
            - No environment isolation
 
-        If ANY of the DO NOT REPORT conditions are met, 
-        the finding should be skipped completely, 
+        If ANY of the DO NOT REPORT conditions are met,
+        the finding should be skipped completely,
         regardless of other factors.
-        
+
         Rate severity based on context:
         - Critical (9-10): Web/API endpoints accepting user data
         - High (7-8): Network services with external input
         - Medium (5-6): Internal services with indirect exposure
         - Low (3-4): Internal tools with controlled input
         - Info (1-2): Developer utilities with trusted data
-        
+
         Respond with valid JSON only, using this structure:
         {
             "vulnerabilities": [
@@ -122,7 +129,7 @@ class AIProvider(ABC):
                 }
             ]
         }
-        
+
         Severity guidelines:
         10: Critical - Remote code execution, data breach
         8-9: High - Authentication bypass, SQL injection
@@ -168,26 +175,28 @@ class AIProvider(ABC):
         - Low (3-4): Internal CLI tools
         - Info (1-2): Developer utilities
         """
-    
+
     def _secure_api_key(self, api_key: str) -> str:
         """Validate and secure API key"""
         if not api_key or not isinstance(api_key, str):
             raise ValueError("API key is required")
         return api_key
-    
+
     @abstractmethod
-    async def _analyze_with_ai(self, code: str, file_path: str, context: Dict = None) -> Dict:
+    async def _analyze_with_ai(
+        self, code: str, file_path: str, context: Dict = None
+    ) -> Dict:
         """Provider-specific AI analysis implementation"""
         pass
-    
+
     def _get_default_response(self) -> Dict:
         """Get default response when analysis fails"""
         return {
             "vulnerabilities": [],
             "overall_score": 100,
-            "summary": "Failed to analyze code"
+            "summary": "Failed to analyze code",
         }
-    
+
     @property
     def system_prompt(self) -> str:
         return """
@@ -197,20 +206,20 @@ class AIProvider(ABC):
            - Distinguish between code patterns and actual vulnerabilities
            - Consider the execution context and deployment environment
            - Understand common security design patterns
-        
+
         2. Code Pattern Recognition:
            SAFE patterns:
            - Constructor parameters
            - Environment variables
            - Configuration loading
            - Dependency injection
-           
+
            UNSAFE patterns:
            - String literals containing secrets
            - Inline credentials
            - Bypassed security controls
            - Direct system calls
-        
+
         3. Risk Assessment Framework:
            - Impact: What's the potential damage?
            - Exploitability: How easy to exploit?
@@ -223,7 +232,7 @@ class AIProvider(ABC):
         3. Actual exposure risk
         4. Missing security controls
         """
-    
+
     def _standardize_vulnerability(self, vuln: Dict, file_path: str) -> Dict:
         """Standardize vulnerability format"""
         try:
@@ -234,25 +243,27 @@ class AIProvider(ABC):
                 "line_number": int(vuln["line_number"]),
                 "file": file_path,
                 "risk_analysis": str(vuln["risk_analysis"]).strip(),
-                "recommendation": str(vuln["recommendation"]).strip()
+                "recommendation": str(vuln["recommendation"]).strip(),
             }
         except (KeyError, ValueError) as e:
             logger.error(f"Error standardizing vulnerability: {e}")
             return None
-    
+
     def _calculate_score(self, vulnerabilities: List[Dict]) -> int:
         """Calculate overall security score"""
         if not vulnerabilities:
             return 100
         max_severity = max(v["severity"] for v in vulnerabilities)
         return max(0, 100 - (max_severity * 10))
-    
+
     def _is_test_file(self, file_path: str) -> bool:
         """检查是否为测试文件"""
         normalized_path = file_path.replace("\\", "/").lower()
         return any(indicator in normalized_path for indicator in self.test_indicators)
 
-    async def analyze_code(self, code: str, file_path: str, context: Dict = None) -> Dict:
+    async def analyze_code(
+        self, code: str, file_path: str, context: Dict = None
+    ) -> Dict:
         """Common code analysis implementation"""
         try:
             # 验证输入
@@ -260,46 +271,52 @@ class AIProvider(ABC):
                 return self._get_default_response()
             if not file_path or not isinstance(file_path, str):
                 return self._get_default_response()
-            
+
             # 跳过测试文件
             if self._is_test_file(file_path):
                 logger.info(f"Skipping test file: {file_path}")
                 return {
                     "vulnerabilities": [],
                     "overall_score": 100,
-                    "summary": "Skipped test file"
+                    "summary": "Skipped test file",
                 }
-            
+
             # 调用具体实现
             result = await self._analyze_with_ai(code, file_path, context)
-            
+
             # 标准化结果
             if "vulnerabilities" in result:
                 for vuln in result["vulnerabilities"]:
                     vuln["source"] = "ai"
                     vuln["file"] = file_path
-            
+
             return result
-            
+
         except Exception as e:
             logger.error(f"Error in code analysis: {e}")
             return self._get_default_response()
-    
-    async def deduplicate_vulnerabilities(self, vulnerabilities: List[Dict]) -> List[Dict]:
+
+    async def deduplicate_vulnerabilities(
+        self, vulnerabilities: List[Dict]
+    ) -> List[Dict]:
         """Common vulnerability deduplication logic"""
         if not vulnerabilities:
             return []
-        
+
         # 基本去重
         unique_vulns = []
         seen = set()
-        
+
         for vuln in vulnerabilities:
-            key = (vuln.get("type", ""), vuln.get("file", ""), vuln.get("line_number", 0))
+            key = (
+                vuln.get("type", ""),
+                vuln.get("file", ""),
+                vuln.get("line_number", 0),
+            )
             if key not in seen:
                 seen.add(key)
                 unique_vulns.append(vuln)
-        
+
         return unique_vulns
 
     def _prepare_prompt(self, code: str, context: Dict = None) -> str:
@@ -308,23 +325,23 @@ class AIProvider(ABC):
         ```python
         def __init__(self, api_key: str):
             self.api_key = api_key  # SAFE: Parameter injection
-        
+
         def connect(self, password=os.getenv("DB_PASS")):
             self.db.connect(password)  # SAFE: Environment variable
         ```
-        
+
         Examples of what to flag:
         ```python
         PASSWORD = "admin123"  # UNSAFE: Hardcoded credential
         api_key = "sk-1234567890abcdef"  # UNSAFE: Actual API key
         ```
-        
+
         Code to analyze:
         {code}
-        
+
         Context:
         {json.dumps(context) if context else 'No additional context'}
-        """ 
+        """
 
     def _get_decision_prompt(self) -> str:
         return """
@@ -335,7 +352,7 @@ class AIProvider(ABC):
                  Yes -> SAFE
                  No  -> Continue
            No  -> Continue
-        
+
         2. Is it actual data?
            Yes -> Is it sensitive?
                  Yes -> Is it production?
@@ -343,7 +360,7 @@ class AIProvider(ABC):
                       No  -> SAFE
                  No  -> SAFE
            No  -> SAFE
-        """ 
+        """
 
     def _get_context_categories(self) -> str:
         return """
@@ -353,27 +370,29 @@ class AIProvider(ABC):
            - Configuration management
            - Deployment scripts
            - Build tools
-        
+
         2. Application Code
            - Business logic
            - API endpoints
            - Data processing
-        
+
         3. Test Code
            - Unit tests
            - Integration tests
            - Benchmarks
-        
-        Adjust severity and reporting based on category.
-        """ 
 
-    async def filter_false_positives(self, scan_result: Dict, file_contents: Dict = None) -> Dict:
+        Adjust severity and reporting based on category.
+        """
+
+    async def filter_false_positives(
+        self, scan_result: Dict, file_contents: Dict = None
+    ) -> Dict:
         """Filter false positives from scan results
-        
+
         Args:
             scan_result: The complete scan result with vulnerabilities
             file_contents: Optional dict mapping file paths to their contents
-            
+
         Returns:
             Filtered scan result
         """
@@ -381,71 +400,88 @@ class AIProvider(ABC):
             # 如果没有漏洞，直接返回
             if not scan_result.get("vulnerabilities"):
                 return scan_result
-            
+
             # 构建提示
             prompt = self._build_filter_prompt(scan_result, file_contents)
-            
+
             # 调用 API
             response = await self._call_api(prompt)
-            
+
             # 解析响应
             try:
                 # 查找 JSON 块
-                json_match = re.search(r'```json\s*(.*?)\s*```', response, re.DOTALL)
+                json_match = re.search(r"```json\s*(.*?)\s*```", response, re.DOTALL)
                 if json_match:
                     json_str = json_match.group(1)
                     # 修复常见的 JSON 格式问题
                     json_str = self._fix_json_format(json_str)
                     try:
                         filtered_result = json.loads(json_str)
-                        
+
                         # 验证结果格式
-                        if "vulnerabilities" in filtered_result and isinstance(filtered_result["vulnerabilities"], list):
+                        if "vulnerabilities" in filtered_result and isinstance(
+                            filtered_result["vulnerabilities"], list
+                        ):
                             # 更新分数和摘要
                             vulns = filtered_result["vulnerabilities"]
                             if vulns:
-                                avg_severity = sum(v.get("severity", 5) for v in vulns) / len(vulns)
-                                filtered_result["overall_score"] = self._calculate_security_score(vulns)
-                                filtered_result["summary"] = f"Found {len(vulns)} potential issues after filtering false positives"
+                                avg_severity = sum(
+                                    v.get("severity", 5) for v in vulns
+                                ) / len(vulns)
+                                filtered_result["overall_score"] = (
+                                    self._calculate_security_score(vulns)
+                                )
+                                filtered_result["summary"] = (
+                                    f"Found {len(vulns)} potential issues after filtering false positives"
+                                )
                             else:
                                 filtered_result["overall_score"] = 100
-                                filtered_result["summary"] = "No security issues found after filtering false positives"
-                            
+                                filtered_result["summary"] = (
+                                    "No security issues found after filtering false positives"
+                                )
+
                             # 保留原始元数据
                             if "metadata" in scan_result:
                                 filtered_result["metadata"] = scan_result["metadata"]
                                 # 添加过滤信息
                                 filtered_result["metadata"]["filtered"] = True
-                                filtered_result["metadata"]["original_vulnerabilities"] = len(scan_result.get("vulnerabilities", []))
-                                filtered_result["metadata"]["filtered_vulnerabilities"] = len(vulns)
-                            
+                                filtered_result["metadata"][
+                                    "original_vulnerabilities"
+                                ] = len(scan_result.get("vulnerabilities", []))
+                                filtered_result["metadata"][
+                                    "filtered_vulnerabilities"
+                                ] = len(vulns)
+
                             return filtered_result
                     except json.JSONDecodeError:
                         logger.error("Failed to parse filtered result JSON")
             except Exception as e:
                 logger.error(f"Error parsing filter response: {e}")
-            
+
             # 如果解析失败，返回原始结果
             return scan_result
-            
+
         except Exception as e:
             logger.error(f"Error filtering false positives: {e}")
             return scan_result
-    def _build_filter_prompt(self, scan_result: Dict, file_contents: Dict = None) -> str:
+
+    def _build_filter_prompt(
+        self, scan_result: Dict, file_contents: Dict = None
+    ) -> str:
         """Build prompt for filtering false positives
-        
+
         Args:
             scan_result: The complete scan result with vulnerabilities
             file_contents: Optional dict mapping file paths to their contents
-            
+
         Returns:
             Prompt for filtering false positives
         """
         # 获取漏洞列表
         vulnerabilities = scan_result.get("vulnerabilities", [])
-        
+
         # 构建提示
-        prompt = f"""You are a security expert reviewing scan results for false positives. 
+        prompt = f"""You are a security expert reviewing scan results for false positives.
 I have a security scan result with {len(vulnerabilities)} potential vulnerabilities.
 Please review each vulnerability and determine if it's a real issue or a false positive.
 
@@ -454,7 +490,7 @@ IMPORTANT: Your response MUST be in English only. Do not use any other language.
 Here are the vulnerabilities:
 
 """
-        
+
         # 添加每个漏洞的详细信息
         for i, vuln in enumerate(vulnerabilities):
             prompt += f"Vulnerability #{i+1}:\n"
@@ -465,22 +501,22 @@ Here are the vulnerabilities:
             prompt += f"Description: {vuln.get('description', 'Unknown')}\n"
             prompt += f"Risk Analysis: {vuln.get('risk_analysis', 'Unknown')}\n"
             prompt += f"Recommendation: {vuln.get('recommendation', 'Unknown')}\n\n"
-        
+
         # 如果有文件内容，添加相关文件的内容
         if file_contents:
             prompt += "Here are the relevant file contents:\n\n"
-            
+
             # 获取漏洞中提到的所有文件
             vuln_files = set()
             for vuln in vulnerabilities:
-                file_path = vuln.get('file')
+                file_path = vuln.get("file")
                 if file_path and file_path in file_contents:
                     vuln_files.add(file_path)
-            
+
             # 添加每个文件的内容
             for file_path in vuln_files:
                 prompt += f"File: {file_path}\n```\n{file_contents[file_path]}\n```\n\n"
-        
+
         # 添加指导
         prompt += """Please analyze each vulnerability and determine if it's a real issue or a false positive.
 Common reasons for false positives include:
@@ -502,34 +538,38 @@ Return a JSON object with only the real vulnerabilities (remove false positives)
 If all vulnerabilities are false positives, return an empty array for "vulnerabilities".
 Remember: Your response MUST be in English only.
 """
-        
+
         return prompt
 
     def _fix_json_format(self, json_str: str) -> str:
         """Fix common JSON format issues"""
         # 修复缺少引号的键
-        json_str = re.sub(r'([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:', r'\1"\2":', json_str)
-        
+        json_str = re.sub(
+            r"([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:", r'\1"\2":', json_str
+        )
+
         # 修复单引号
         json_str = json_str.replace("'", '"')
-        
+
         # 修复尾部逗号
-        json_str = re.sub(r',\s*}', '}', json_str)
-        json_str = re.sub(r',\s*]', ']', json_str)
-        
+        json_str = re.sub(r",\s*}", "}", json_str)
+        json_str = re.sub(r",\s*]", "]", json_str)
+
         # 修复缺少值的情况
-        json_str = re.sub(r':\s*,', ': null,', json_str)
-        json_str = re.sub(r':\s*}', ': null}', json_str)
-        
+        json_str = re.sub(r":\s*,", ": null,", json_str)
+        json_str = re.sub(r":\s*}", ": null}", json_str)
+
         return json_str
 
-    async def deep_audit_vulnerabilities(self, scan_result: Dict, file_contents: Dict = None) -> Dict:
+    async def deep_audit_vulnerabilities(
+        self, scan_result: Dict, file_contents: Dict = None
+    ) -> Dict:
         """Deep audit of vulnerabilities for detailed analysis
-        
+
         Args:
             scan_result: The scan result with confirmed vulnerabilities
             file_contents: Optional dict mapping file paths to their contents
-            
+
         Returns:
             Dict with detailed vulnerability analysis
         """
@@ -537,61 +577,69 @@ Remember: Your response MUST be in English only.
             # 如果没有漏洞，直接返回
             if not scan_result.get("vulnerabilities"):
                 return scan_result
-            
+
             # 构建提示
             prompt = self._build_deep_audit_prompt(scan_result, file_contents)
-            
+
             # 调用 API
             response = await self._call_api(prompt)
-            
+
             # 解析响应
             try:
                 # 查找 JSON 块
-                json_match = re.search(r'```json\s*(.*?)\s*```', response, re.DOTALL)
+                json_match = re.search(r"```json\s*(.*?)\s*```", response, re.DOTALL)
                 if json_match:
                     json_str = json_match.group(1)
                     # 修复常见的 JSON 格式问题
                     json_str = self._fix_json_format(json_str)
                     try:
                         audit_result = json.loads(json_str)
-                        
+
                         # 验证结果格式
-                        if "vulnerabilities" in audit_result and isinstance(audit_result["vulnerabilities"], list):
+                        if "vulnerabilities" in audit_result and isinstance(
+                            audit_result["vulnerabilities"], list
+                        ):
                             # 更新漏洞详细信息
-                            scan_result["vulnerabilities"] = audit_result["vulnerabilities"]
-                            
+                            scan_result["vulnerabilities"] = audit_result[
+                                "vulnerabilities"
+                            ]
+
                             # 添加深度分析元数据
                             if "metadata" not in scan_result:
                                 scan_result["metadata"] = {}
                             scan_result["metadata"]["deep_audited"] = True
-                            scan_result["metadata"]["audit_timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S")
-                            
+                            scan_result["metadata"]["audit_timestamp"] = time.strftime(
+                                "%Y-%m-%d %H:%M:%S"
+                            )
+
                             return scan_result
                     except json.JSONDecodeError:
                         logger.error("Failed to parse deep audit result JSON")
             except Exception as e:
                 logger.error(f"Error parsing deep audit response: {e}")
-            
+
             # 如果解析失败，返回原始结果
             return scan_result
-            
+
         except Exception as e:
             logger.error(f"Error in deep audit: {e}")
             return scan_result
 
-    def _build_deep_audit_prompt(self, scan_result: Dict, file_contents: Dict = None) -> str:
+    def _build_deep_audit_prompt(
+        self, scan_result: Dict, file_contents: Dict = None
+    ) -> str:
         """Build prompt for deep vulnerability audit
-        
+
         Args:
             scan_result: The scan result with confirmed vulnerabilities
             file_contents: Optional dict mapping file paths to their contents
-            
+
         Returns:
             Prompt for deep vulnerability audit
         """
         # 获取漏洞列表
         vulnerabilities = scan_result.get("vulnerabilities", [])
-        
+
         # 构建提示
         prompt = f"""You are a senior security expert performing a deep analysis of confirmed vulnerabilities.
 I have {len(vulnerabilities)} confirmed security vulnerabilities that need detailed analysis.
@@ -609,7 +657,7 @@ For each vulnerability, provide a comprehensive analysis including:
 Here are the vulnerabilities:
 
 """
-        
+
         # 添加每个漏洞的详细信息
         for i, vuln in enumerate(vulnerabilities):
             prompt += f"\nVulnerability #{i+1}:\n"
@@ -618,18 +666,18 @@ Here are the vulnerabilities:
             prompt += f"File: {vuln.get('file', 'Unknown')}\n"
             prompt += f"Line: {vuln.get('line_number', 'Unknown')}\n"
             prompt += f"Description: {vuln.get('description', 'Unknown')}\n"
-            
+
             # 如果有文件内容，添加相关代码片段
-            file_path = vuln.get('file')
+            file_path = vuln.get("file")
             if file_contents and file_path in file_contents:
-                line_number = vuln.get('line_number', 0)
+                line_number = vuln.get("line_number", 0)
                 if line_number > 0:
                     lines = file_contents[file_path].splitlines()
                     start_line = max(0, line_number - 5)
                     end_line = min(len(lines), line_number + 5)
-                    code_context = '\n'.join(lines[start_line:end_line])
+                    code_context = "\n".join(lines[start_line:end_line])
                     prompt += f"\nRelevant Code Context:\n```\n{code_context}\n```\n"
-        
+
         # 添加响应格式指导
         prompt += """
 Please analyze each vulnerability and provide detailed information in the following JSON format:
@@ -658,5 +706,5 @@ Please analyze each vulnerability and provide detailed information in the follow
 
 Focus on providing actionable insights and practical recommendations.
 """
-        
+
         return prompt

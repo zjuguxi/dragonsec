@@ -6,11 +6,11 @@ import os
 import shutil
 
 async def performance_test():
-    # 创建测试目录
+    # Create test directory
     test_dir = Path("test_project")
     test_dir.mkdir(exist_ok=True)
     
-    # 创建多个测试文件
+    # Create multiple test files
     for i in range(5):
         file_path = test_dir / f"file_{i}.py"
         with open(file_path, "w") as f:
@@ -28,11 +28,11 @@ def another_function_{i}():
     return password
 """)
     
-    # 测试不同模式的性能
+    # Test different modes performance
     modes = [ScanMode.SEMGREP_ONLY, ScanMode.LOCAL]
     
     for mode in modes:
-        print(f"\n测试模式: {mode.value}")
+        print(f"\nTest mode: {mode.value}")
         scanner = SecurityScanner(
             mode=mode,
             verbose=True,
@@ -43,11 +43,11 @@ def another_function_{i}():
         result = await scanner.scan_directory(str(test_dir))
         end_time = time.time()
         
-        print(f"  扫描时间: {end_time - start_time:.2f} 秒")
-        print(f"  发现漏洞数量: {len(result.get('vulnerabilities', []))}")
-        print(f"  安全评分: {result.get('overall_score')}")
+        print(f"   Scan time: {end_time - start_time:.2f} seconds")
+        print(f"   Vulnerability count: {len(result.get('vulnerabilities', []))}")
+        print(f"   Security score: {result.get('overall_score')}")
     
-    # 清理测试目录
+    # Clean up test directory
     shutil.rmtree(test_dir)
 
 if __name__ == "__main__":

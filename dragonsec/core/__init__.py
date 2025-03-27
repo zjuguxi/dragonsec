@@ -1,1 +1,1 @@
-"""Core functionality for DragonSec""" 
+"""Core functionality for DragonSec"""

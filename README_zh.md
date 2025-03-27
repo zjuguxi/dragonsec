@@ -4,7 +4,7 @@
 
 [![codecov](https://codecov.io/gh/zjuguxi/dragonsec/branch/main/graph/badge.svg)](https://codecov.io/gh/zjuguxi/dragonsec)
 ![Python 版本](https://img.shields.io/badge/python-3.9%2B-blue)
-![许可证](https://img.shields.io/badge/license-Apache%202-green)  
+![许可证](https://img.shields.io/badge/license-Apache%202-green)
 
 <!-- END BADGIE TIME -->
 
@@ -143,7 +143,7 @@ dragonsec scan [选项]
 
 扫描模式:
   --mode MODE              扫描模式 [默认: semgrep]
-                          选项: 
+                          选项:
                           - semgrep (基础静态分析)
                           - openai (OpenAI 增强)
                           - gemini (Google Gemini 增强)
