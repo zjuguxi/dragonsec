@@ -36,7 +36,12 @@ def another_function_{i}():
 
     for mode in modes:
         print(f"\nTest mode: {mode.value}")
-        scanner = SecurityScanner(mode=mode, verbose=True, batch_size=2)
+        scanner = SecurityScanner(
+            mode=mode, 
+            verbose=True, 
+            batch_size=2,
+            include_tests=True
+        )
 
         start_time = time.time()
         result = await scanner.scan_directory(str(test_dir))

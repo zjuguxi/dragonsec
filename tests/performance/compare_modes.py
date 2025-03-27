@@ -7,7 +7,7 @@ import os
 
 async def compare_modes():
     # Get test file path
-    test_file = Path(__file__).parent / "tests" / "fixtures" / "vulnerable_code.py"
+    test_file = Path(__file__).parent / "fixtures" / "vulnerable_code.py"
     if not test_file.exists():
         print(f"Test file does not exist: {test_file}")
         return
