@@ -3,7 +3,7 @@
 <!-- BADGIE TIME -->
 
 [![codecov](https://codecov.io/gh/zjuguxi/dragonsec/branch/main/graph/badge.svg)](https://codecov.io/gh/zjuguxi/dragonsec)
-![Python Version](https://img.shields.io/badge/python-3.8%2B-blue)
+![Python Version](https://img.shields.io/badge/python-3.9%2B-blue)
 ![License](https://img.shields.io/badge/license-Apache%202-green)  
 
 <!-- END BADGIE TIME -->
@@ -15,11 +15,11 @@ DragonSec is an advanced security scanner that combines traditional static analy
 ## Features
 
 - **Multiple AI Models Support**:
-  - OpenAI GPT-4o
-  - Google Gemini-1.5-flash
+  - OpenAI GPT-4
+  - Google Gemini
   - Deepseek R1 (Aliyun)
-  - xAI Grok
-  - More models coming soon...
+  - Grok
+  - Local AI Models (via Ollama)
 
 - **Static Analysis**:
   - Integrated with Semgrep for reliable static code analysis
@@ -42,9 +42,9 @@ pip install dragonsec
 
 1. Set up your API keys:
 ```bash
-export OPENAI_API_KEY="your-openai-key"  # For GPT-4
-export GEMINI_API_KEY="your-gemini-key"  # For Gemini
-export DEEPSEEK_API_KEY="your-deepseek-key"  # For Deepseek
+export OPENAI_API_KEY="your-openai-key"  # For OpenAI models
+export GEMINI_API_KEY="your-gemini-key"  # For Google Gemini
+export DEEPSEEK_API_KEY="your-deepseek-key"  # For Deepseek R1(Aliyun)
 ```
 
 2. Run a scan:
@@ -52,11 +52,14 @@ export DEEPSEEK_API_KEY="your-deepseek-key"  # For Deepseek
 # Using OpenAI GPT-4
 dragonsec scan --path /path/to/code --mode openai --api-key $OPENAI_API_KEY
 
-# Using Google Gemini-1.5-flash
+# Using Google Gemini
 dragonsec scan --path /path/to/code --mode gemini --api-key $GEMINI_API_KEY
 
 # Using Deepseek R1 (Aliyun)
 dragonsec scan --path /path/to/code --mode deepseek --api-key $DEEPSEEK_API_KEY
+
+# Using Local AI Model via Ollama
+dragonsec scan --path /path/to/code --mode local --local-url http://localhost:11434 --local-model deepseek-r1:32b
 
 # Using only Semgrep (no API key needed)
 dragonsec scan --path /path/to/code --mode semgrep
@@ -125,9 +128,10 @@ Scan Mode:
   --mode MODE              Scanning mode [default: semgrep]
                           Choices: 
                           - semgrep (basic static analysis)
-                          - openai (GPT-4o enhanced)
-                          - gemini (Gemini-1.5-flash enhanced)
-                          - deepseek (Deepseek R1 enhanced)
+                          - openai (OpenAI enhanced)
+                          - gemini (Google Gemini enhanced)
+                          - deepseek (Deepseek R1 on Aliyun)
+                          - local (Local AI model)
 
 Authentication:
   --api-key KEY            API key for AI service (required for AI modes)
