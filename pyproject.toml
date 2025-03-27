@@ -28,6 +28,7 @@ dependencies = [
     "requests",
     "pyyaml",
     "tenacity",
+    "pre-commit",
 ]
 
 [project.optional-dependencies]
