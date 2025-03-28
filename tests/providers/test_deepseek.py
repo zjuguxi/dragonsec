@@ -1,93 +1,80 @@
+"""Test Deepseek provider."""
+
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, patch, MagicMock
 from dragonsec.providers.deepseek import DeepseekProvider
-from tests.providers.test_openai import (
-    test_analyze_code_success as test_openai_analyze_success,
-    test_analyze_code_error as test_openai_analyze_error,
-)
 import asyncio
-
-
-@pytest.fixture
-def openai_provider(deepseek_provider):
-    """重用 OpenAI 测试的 fixture，但返回 Deepseek provider"""
-    return deepseek_provider
 
 
 @pytest.fixture
 def deepseek_provider():
     """Create a test instance of DeepseekProvider"""
-    with patch("dragonsec.providers.base.AIProvider._secure_api_key") as mock_secure:
-        mock_secure.return_value = "test_key"
-        provider = DeepseekProvider("test_key")
-        # Verify initialization parameters
-        assert provider.model == "deepseek-r1"
-        assert "dashscope.aliyuncs.com" in str(provider.client.base_url)
-        return provider
-
-
-# Reuse OpenAI tests
-test_analyze_code_success = test_openai_analyze_success
-test_analyze_code_error = test_openai_analyze_error
+    return DeepseekProvider(api_key="test_key")
 
 
 @pytest.mark.asyncio
 async def test_deepseek_specific_response_format(deepseek_provider):
-    """Test Deepseek specific response format handling"""
-
-    # Create an async mock function
-    async def mock_create(*args, **kwargs):
-        return AsyncMock(
-            choices=[
-                AsyncMock(
-                    message=AsyncMock(
-                        content="""
+    """Test Deepseek-specific response format handling."""
+    mock_response = MagicMock()
+    mock_response.choices = [
+        MagicMock(
+            message=MagicMock(
+                content='''{
+                    "vulnerabilities": [
                         {
-                            "vulnerabilities": [
-                                {
-                                    "type": "sql_injection",
-                                    "severity": 8,
-                                    "description": "SQL injection found",
-                                    "line_number": 15,
-                                    "risk_analysis": "High risk",
-                                    "recommendation": "Use parameterized queries"
-                                }
-                            ]
+                            "type": "SQL Injection",
+                            "severity": "high",
+                            "line": 10,
+                            "suggestion": "Use parameterized queries"
                         }
-                        """
-                    )
-                )
-            ]
+                    ],
+                    "overall_score": 85
+                }'''
+            )
         )
+    ]
 
-    # Use async mock function
-    with patch(
-        "openai.resources.chat.completions.AsyncCompletions.create", new=mock_create
-    ):
-        result = await deepseek_provider.analyze_code(
-            code="query = f'SELECT * FROM users WHERE id = {user_input}'",
-            file_path="test.py",
-            context={},
-        )
+    async def mock_create(*args, **kwargs):
+        return mock_response
 
-        assert "vulnerabilities" in result
+    with patch.object(deepseek_provider.client.chat.completions, "create", mock_create):
+        result = await deepseek_provider.analyze_code("test code")
         assert len(result["vulnerabilities"]) == 1
-        vuln = result["vulnerabilities"][0]
-        assert vuln["type"] == "sql_injection"
-        assert vuln["severity"] == 8
+        assert result["vulnerabilities"][0]["type"] == "SQL Injection"
+        assert result["vulnerabilities"][0]["severity"] == "high"
+        assert result["overall_score"] == 85
+
+
+@pytest.mark.asyncio
+async def test_deepseek_specific_error_handling(deepseek_provider):
+    """Test Deepseek-specific error handling."""
+    with patch.object(deepseek_provider.client.chat.completions, "create", side_effect=Exception("API error")):
+        result = await deepseek_provider.analyze_code("test code")
+        assert len(result["vulnerabilities"]) == 0
+        assert result["overall_score"] == 0
+        assert "API error" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_deepseek_specific_timeout_handling(deepseek_provider):
+    """Test Deepseek-specific timeout handling."""
+    with patch.object(deepseek_provider.client.chat.completions, "create", side_effect=TimeoutError("Request timed out")):
+        result = await deepseek_provider.analyze_code("test code")
+        assert len(result["vulnerabilities"]) == 0
+        assert result["overall_score"] == 0
+        assert "Request timed out" in result["error"]
 
 
 def test_deepseek_specific_init():
     """Test Deepseek specific initialization"""
     provider = DeepseekProvider("test_key")
-    assert provider.model == "deepseek-r1"
-    assert "dashscope.aliyuncs.com" in str(provider.client.base_url)
+    assert provider.model == "deepseek/deepseek-coder-33b-instruct"
+    assert str(provider.client.base_url).rstrip("/") == "https://openrouter.ai/api/v1"
 
 
 def test_calculate_security_score(deepseek_provider):
     """Test security score calculation"""
     vulnerabilities = [{"severity": 8}, {"severity": 6}, {"severity": 4}]
-
     score = deepseek_provider._calculate_security_score(vulnerabilities)
     assert 0 <= score <= 100
     assert score == round(100 - (6 * 10), 2)  # Average severity is 6
@@ -103,22 +90,43 @@ def test_empty_vulnerabilities_score(deepseek_provider):
 async def test_deepseek_rate_limiting():
     """Test rate limiting behavior"""
     provider = DeepseekProvider("test_key")
+    mock_response = MagicMock()
+    mock_response.choices = [
+        MagicMock(
+            message=MagicMock(
+                content='{"vulnerabilities": [], "overall_score": 100}'
+            )
+        )
+    ]
 
-    # Test multiple requests in quick succession
-    results = await asyncio.gather(
-        *[provider.analyze_code("print('test')", f"test_{i}.py") for i in range(3)]
-    )
+    async def mock_create(*args, **kwargs):
+        return mock_response
 
-    assert len(results) == 3
-    assert all(isinstance(r, dict) for r in results)
+    with patch.object(provider.client.chat.completions, "create", mock_create):
+        results = await asyncio.gather(
+            *[provider.analyze_code("print('test')", f"test_{i}.py") for i in range(3)]
+        )
+        assert len(results) == 3
+        assert all(isinstance(r, dict) for r in results)
 
 
 @pytest.mark.asyncio
 async def test_deepseek_error_recovery():
     """Test error recovery mechanisms"""
     provider = DeepseekProvider("test_key")
+    mock_response = MagicMock()
+    mock_response.choices = [
+        MagicMock(
+            message=MagicMock(
+                content='{"vulnerabilities": [], "overall_score": 100}'
+            )
+        )
+    ]
 
-    # Test with malformed code
-    result = await provider.analyze_code("def broken_func(:", "test.py")
-    assert isinstance(result, dict)
-    assert "vulnerabilities" in result
+    async def mock_create(*args, **kwargs):
+        return mock_response
+
+    with patch.object(provider.client.chat.completions, "create", mock_create):
+        result = await provider.analyze_code("def broken_func(:", "test.py")
+        assert isinstance(result, dict)
+        assert "vulnerabilities" in result

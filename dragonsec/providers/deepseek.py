@@ -1,7 +1,6 @@
 import json
 import logging
 from typing import Dict, Any, List, Tuple
-from .openai import OpenAIProvider
 from pathlib import Path
 from tenacity import (
     retry,
@@ -13,23 +12,28 @@ import httpx
 import asyncio
 import os
 import random
-from .base import AIProvider
-from openai import AsyncOpenAI  # 修改导入
+from openai import AsyncOpenAI
+from dragonsec.providers.base import AIProvider
+from dragonsec.utils.secure import secure
 
 logger = logging.getLogger(__name__)
 
 
 class DeepseekProvider(AIProvider):
-    """Deepseek AI provider for code analysis"""
+    """Deepseek provider implementation."""
 
     def __init__(self, api_key: str):
+        """Initialize Deepseek provider.
+
+        Args:
+            api_key: OpenRouter API key
+        """
         super().__init__(api_key)
-        # 使用 AsyncOpenAI 替代 DeepseekClient
         self.client = AsyncOpenAI(
-            api_key=api_key,
-            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            base_url="https://openrouter.ai/api/v1",
+            api_key=self.api_key,
         )
-        self.model = "deepseek-r1"  # 修改为正确的模型名称
+        self.model = "deepseek/deepseek-coder-33b-instruct"
         self.timeout = httpx.Timeout(60.0)
         self.max_retries = 3
         self.concurrent_limit = 2
@@ -39,84 +43,71 @@ class DeepseekProvider(AIProvider):
         """Get default response when analysis fails"""
         return {"vulnerabilities": [], "overall_score": 0, "summary": "Analysis failed"}
 
-    async def _analyze_with_ai(
-        self, code: str, file_path: str, context: Dict = None
-    ) -> Dict:
-        """Deepseek-specific implementation"""
-        try:
-            logger.info(f"Starting Deepseek analysis for {file_path}")
+    async def analyze_code(
+        self, code: str, language: str = "python"
+    ) -> Dict[str, any]:
+        """Analyze code using Deepseek API.
 
-            response = await self.client.chat.completions.create(
+        Args:
+            code: Code to analyze
+            language: Programming language
+
+        Returns:
+            Analysis results
+        """
+        try:
+            messages = [
+                {
+                    "role": "system",
+                    "content": """You are a security expert. Analyze the code for security vulnerabilities.
+                    Return a JSON response with:
+                    {
+                        "vulnerabilities": [
+                            {
+                                "type": "vulnerability type",
+                                "severity": "high/medium/low",
+                                "line": line number,
+                                "suggestion": "fix suggestion"
+                            }
+                        ],
+                        "overall_score": score between 0-100
+                    }""",
+                },
+                {"role": "user", "content": f"Analyze this {language} code:\n{code}"},
+            ]
+
+            completion = await self.client.chat.completions.create(
                 model=self.model,
-                messages=[
-                    {"role": "system", "content": self._get_system_prompt()},
-                    {"role": "user", "content": f"Analyze this code:\n\n{code}"},
-                ],
-                timeout=self.timeout,
+                messages=messages,
+                temperature=0.1,
+                max_tokens=2000,
+                extra_headers={
+                    "HTTP-Referer": "https://github.com/dragonsec/dragonsec",
+                    "X-Title": "DragonSec",
+                },
             )
 
-            content = response.choices[0].message.content
-            logger.debug(f"Raw response content: {content}")
-
             try:
-                return json.loads(content)
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse response as JSON: {e}")
-                logger.debug(f"Failed content: {content}")
-                return self._get_default_response()
+                # Extract the content from the response
+                content = completion.choices[0].message.content
+                # Parse the JSON response
+                analysis = json.loads(content)
+                return analysis
+            except (KeyError, json.JSONDecodeError) as e:
+                logger.error(f"Error parsing Deepseek response: {e}")
+                return {
+                    "vulnerabilities": [],
+                    "overall_score": 0,
+                    "error": f"Response parsing error: {str(e)}",
+                }
 
         except Exception as e:
-            logger.error(f"Error calling Deepseek API: {e}")
-            return self._get_default_response()
-
-    async def analyze_code(
-        self, code: str, file_path: str, context: Dict = None
-    ) -> Dict[str, Any]:
-        """Analyze code using Deepseek AI"""
-        try:
-            logger.info(f"Starting Deepseek analysis for {file_path}")
-            prompt = self._build_prompt(code, file_path, context)
-            logger.debug(f"Generated prompt length: {len(prompt)}")
-
-            response = await self._call_api(prompt)
-            logger.info("Received response from Deepseek API")
-            logger.debug(f"Response length: {len(response)}")
-
-            result = self._parse_response(response)
-
-            # 在测试环境中使用文件名，在实际环境中使用相对路径
-            if os.getenv("PYTEST_CURRENT_TEST"):
-                file_path = os.path.basename(file_path)
-            else:
-                try:
-                    file_path = str(Path(file_path).relative_to(Path.cwd()))
-                except ValueError:
-                    file_path = os.path.basename(file_path)
-
-            # 确保每个漏洞都包含必要的信息并格式统一
-            for vuln in result.get("vulnerabilities", []):
-                vuln.update(
-                    {
-                        "source": "ai",
-                        "file": file_path,
-                        "type": vuln.get("type", "Unknown"),
-                        "severity": vuln.get("severity", 5),
-                        "description": vuln.get("description", ""),
-                        "line_number": vuln.get("line_number", 0),
-                        "risk_analysis": vuln.get("risk_analysis", "Unknown risk"),
-                        "recommendation": vuln.get(
-                            "recommendation", "No recommendation provided"
-                        ),
-                    }
-                )
-
-            vuln_count = len(result.get("vulnerabilities", []))
-            logger.info(f"Analysis completed with {vuln_count} findings")
-            return result
-
-        except Exception as e:
-            logger.error(f"Error analyzing code with Deepseek: {e}")
-            return self._get_default_response()
+            logger.error(f"Error in Deepseek analysis: {e}")
+            return {
+                "vulnerabilities": [],
+                "overall_score": 0,
+                "error": str(e),
+            }
 
     @retry(
         stop=stop_after_attempt(3),
@@ -338,3 +329,58 @@ class DeepseekProvider(AIProvider):
             await asyncio.sleep(self.batch_delay * 2)
 
         return results
+
+    async def _analyze_with_ai(
+        self, code: str, file_path: str, context: Dict = None
+    ) -> Dict:
+        """Analyze code using Deepseek API.
+
+        Args:
+            code: Code to analyze
+            file_path: Path to the file being analyzed
+            context: Additional context for analysis
+
+        Returns:
+            Analysis results
+        """
+        try:
+            messages = [
+                {
+                    "role": "system",
+                    "content": self._get_system_prompt(),
+                },
+                {"role": "user", "content": f"Analyze this code:\n{code}"},
+            ]
+
+            completion = await self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=0.1,
+                max_tokens=2000,
+                extra_headers={
+                    "HTTP-Referer": "https://github.com/dragonsec/dragonsec",
+                    "X-Title": "DragonSec",
+                },
+            )
+
+            try:
+                # Extract the content from the response
+                content = completion["choices"][0]["message"]["content"]
+                # Parse the JSON response
+                analysis = json.loads(content)
+                return analysis
+            except (KeyError, json.JSONDecodeError) as e:
+                logger.error(f"Error parsing Deepseek response: {e}")
+                return {
+                    "vulnerabilities": [],
+                    "overall_score": 0,
+                    "error": f"Response parsing error: {str(e)}",
+                }
+
+        except Exception as e:
+            logger.error(f"Error in Deepseek analysis: {e}")
+            return {
+                "vulnerabilities": [],
+                "overall_score": 0,
+                "error": str(e),
+            }
