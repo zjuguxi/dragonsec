@@ -327,9 +327,18 @@ class OpenAIProvider(AIProvider):
             if "vulnerabilities" not in parsed:
                 return self._get_default_response()
 
-            # 确保所有漏洞都标记为 AI 来源
+            # 确保所有漏洞都有完整的字段
             for vuln in parsed.get("vulnerabilities", []):
-                vuln["source"] = "ai"
+                # 设置必需字段
+                vuln["type"] = vuln.get("type", "Unknown")
+                vuln["severity"] = int(vuln.get("severity", 5))
+                vuln["description"] = vuln.get("description", "No description")
+                vuln["line_number"] = int(vuln.get("line_number", 0))
+                vuln["file"] = vuln.get("file", "unknown")
+                vuln["risk_analysis"] = vuln.get("risk_analysis", "No risk analysis")
+                vuln["recommendation"] = vuln.get("recommendation", "No recommendation")
+                vuln["confidence"] = vuln.get("confidence", "medium")
+                vuln["source"] = "openai"
 
             return parsed
 

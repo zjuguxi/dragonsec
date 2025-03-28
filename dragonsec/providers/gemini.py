@@ -15,6 +15,7 @@ import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 import threading
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -364,23 +365,61 @@ class GeminiProvider(AIProvider):
 
         If no vulnerabilities found, return empty array for vulnerabilities. Do not include any markdown formatting or additional text."""
 
-    def _parse_response(self, response: Dict) -> Dict:
+    async def _parse_response(self, response: str, file_path: str) -> Dict:
         """Parse response from Gemini API"""
         try:
-            if not isinstance(response, dict):
-                return self._get_default_response()
+            # 尝试解析 JSON 响应
+            try:
+                # 查找 JSON 块
+                json_match = re.search(r"```json\s*(.*?)\s*```", response, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(1)
+                    result = json.loads(json_str)
 
-            # 确保有必要的字段
-            if "vulnerabilities" not in response:
-                response["vulnerabilities"] = []
-            if "overall_score" not in response:
-                response["overall_score"] = 100
-            if "summary" not in response:
-                response["summary"] = "No issues found"
+                    # 确保结果包含必要的字段
+                    if not isinstance(result, dict):
+                        result = {"vulnerabilities": []}
 
-            return response
+                    if "vulnerabilities" not in result:
+                        result["vulnerabilities"] = []
+
+                    # 标准化每个漏洞对象
+                    for vuln in result["vulnerabilities"]:
+                        # 设置必需字段
+                        vuln["file"] = file_path
+                        vuln["type"] = vuln.get("type", "Unknown")
+                        vuln["severity"] = int(vuln.get("severity", 5))
+                        vuln["description"] = vuln.get("description", "No description")
+                        vuln["line_number"] = int(vuln.get("line_number", 0))
+                        vuln["risk_analysis"] = vuln.get("risk_analysis", "No risk analysis")
+                        vuln["recommendation"] = vuln.get("recommendation", "No recommendation")
+                        vuln["confidence"] = vuln.get("confidence", "medium")
+                        vuln["source"] = "gemini"
+
+                    # 计算整体评分
+                    if "overall_score" not in result:
+                        vulns = result["vulnerabilities"]
+                        if vulns:
+                            result["overall_score"] = self._calculate_security_score(vulns)
+                        else:
+                            result["overall_score"] = 100
+
+                    # 添加摘要
+                    if "summary" not in result:
+                        if result["vulnerabilities"]:
+                            result["summary"] = f"Found {len(result['vulnerabilities'])} potential security issues"
+                        else:
+                            result["summary"] = "No security issues found"
+
+                    return result
+            except json.JSONDecodeError:
+                logger.warning("Failed to parse JSON response")
+
+            # 如果 JSON 解析失败，返回默认响应
+            return self._get_default_response()
+
         except Exception as e:
-            logger.error(f"Error parsing response: {e}")
+            logger.error(f"Error parsing Gemini response: {e}")
             return self._get_default_response()
 
     async def _analyze_with_ai(

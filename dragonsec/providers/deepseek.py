@@ -368,6 +368,21 @@ class DeepseekProvider(AIProvider):
                 content = completion["choices"][0]["message"]["content"]
                 # Parse the JSON response
                 analysis = json.loads(content)
+                
+                # 确保所有漏洞都有完整的字段
+                if "vulnerabilities" in analysis:
+                    for vuln in analysis["vulnerabilities"]:
+                        # 设置必需字段
+                        vuln["file"] = file_path
+                        vuln["type"] = vuln.get("type", "Unknown")
+                        vuln["severity"] = int(vuln.get("severity", 5))
+                        vuln["description"] = vuln.get("description", "No description")
+                        vuln["line_number"] = int(vuln.get("line_number", 0))
+                        vuln["risk_analysis"] = vuln.get("risk_analysis", "No risk analysis")
+                        vuln["recommendation"] = vuln.get("recommendation", "No recommendation")
+                        vuln["confidence"] = vuln.get("confidence", "medium")
+                        vuln["source"] = "deepseek"
+                
                 return analysis
             except (KeyError, json.JSONDecodeError) as e:
                 logger.error(f"Error parsing Deepseek response: {e}")

@@ -122,13 +122,26 @@ class AIProvider(ABC):
                     "severity": 1-10,
                     "description": "detailed description",
                     "line_number": line number,
-                    "file": "file path",
+                    "file": "full file path",
                     "risk_analysis": "specific attack scenarios and impact",
                     "recommendation": "concrete fix suggestions",
-                    "confidence": "high|medium|low"
+                    "confidence": "high|medium|low",
+                    "source": "provider_name"
                 }
-            ]
+            ],
+            "overall_score": 0-100,
+            "summary": "brief security assessment"
         }
+
+        All fields are required. If any field is missing, use these default values:
+        - type: "Unknown"
+        - severity: 5
+        - description: "No description"
+        - line_number: 0
+        - risk_analysis: "No risk analysis"
+        - recommendation: "No recommendation"
+        - confidence: "medium"
+        - source: must be the specific provider name (e.g., "deepseek", "grok", "openai", "gemini", "local")
 
         Severity guidelines:
         10: Critical - Remote code execution, data breach

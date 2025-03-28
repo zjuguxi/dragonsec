@@ -237,7 +237,7 @@ Your task is to identify security issues, assess their severity, and provide rec
                 continue
 
             # 添加源信息
-            vuln["source"] = "ai"
+            vuln["source"] = "local"
 
             # 添加文件信息（如果缺失）
             if "file" not in vuln and file_path:
@@ -513,27 +513,31 @@ If no vulnerabilities are found, return an empty array for "vulnerabilities" and
 
         # 确保漏洞列表是列表
         if not isinstance(result["vulnerabilities"], list):
-            logger.warning(
-                f"Vulnerabilities is not a list: {result['vulnerabilities']}"
-            )
+            logger.warning(f"Vulnerabilities is not a list: {result['vulnerabilities']}")
             result["vulnerabilities"] = []
 
         # 处理漏洞列表
-        result["vulnerabilities"] = self._post_process_vulnerabilities(
-            result["vulnerabilities"], file_path
-        )
+        for vuln in result["vulnerabilities"]:
+            if isinstance(vuln, dict):
+                # 设置必需字段
+                vuln["file"] = file_path
+                vuln["type"] = vuln.get("type", "Unknown")
+                vuln["severity"] = int(vuln.get("severity", 5))
+                vuln["description"] = vuln.get("description", "No description")
+                vuln["line_number"] = int(vuln.get("line_number", 0))
+                
+                # 设置可选字段
+                vuln["risk_analysis"] = vuln.get("risk_analysis", "No risk analysis")
+                vuln["recommendation"] = vuln.get("recommendation", "No recommendation")
+                vuln["confidence"] = vuln.get("confidence", "medium")
+                vuln["source"] = "ai"
 
         # 确保总体评分存在
-        if "overall_score" not in result or not isinstance(
-            result["overall_score"], (int, float)
-        ):
-            # 如果没有漏洞，评分为100；否则根据漏洞计算评分
+        if "overall_score" not in result or not isinstance(result["overall_score"], (int, float)):
             if not result["vulnerabilities"]:
                 result["overall_score"] = 100
             else:
-                result["overall_score"] = self._calculate_security_score(
-                    result["vulnerabilities"]
-                )
+                result["overall_score"] = self._calculate_security_score(result["vulnerabilities"])
 
         # 确保总体评分在0-100之间
         result["overall_score"] = max(0, min(100, result["overall_score"]))
@@ -543,19 +547,8 @@ If no vulnerabilities are found, return an empty array for "vulnerabilities" and
             if not result["vulnerabilities"]:
                 result["summary"] = "No vulnerabilities detected."
             else:
-                vuln_types = [
-                    v.get("type", "Unknown") for v in result["vulnerabilities"]
-                ]
-                result["summary"] = (
-                    f"Found {len(result['vulnerabilities'])} vulnerabilities: {', '.join(vuln_types)}"
-                )
-
-        # 添加文件信息
-        for vuln in result["vulnerabilities"]:
-            if "file" not in vuln and file_path:
-                vuln["file"] = file_path
-            if "file_name" not in vuln and file_path:
-                vuln["file_name"] = os.path.basename(file_path)
+                vuln_types = [v.get("type", "Unknown") for v in result["vulnerabilities"]]
+                result["summary"] = f"Found {len(result['vulnerabilities'])} vulnerabilities: {', '.join(vuln_types)}"
 
         return result
 

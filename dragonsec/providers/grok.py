@@ -165,9 +165,6 @@ class GrokProvider(AIProvider):
             Parsed response with vulnerabilities
         """
         try:
-            # 提取文件名，用于设置正确的文件名
-            file_name = os.path.basename(file_path)
-
             # 尝试解析 JSON 响应
             try:
                 # 查找 JSON 块
@@ -183,33 +180,24 @@ class GrokProvider(AIProvider):
                     if "vulnerabilities" not in result:
                         result["vulnerabilities"] = []
 
-                    # 修复漏洞中的文件名和行号
+                    # 标准化每个漏洞对象
                     for vuln in result["vulnerabilities"]:
-                        # 设置正确的文件名
-                        vuln["file"] = file_name
-
-                        # 如果行号不存在或为默认值 1，尝试从描述中提取
-                        if "line_number" not in vuln or vuln["line_number"] == 1:
-                            # 尝试从描述中提取行号
-                            line_match = re.search(
-                                r"line\s+(\d+)",
-                                vuln.get("description", ""),
-                                re.IGNORECASE,
-                            )
-                            if line_match:
-                                vuln["line_number"] = int(line_match.group(1))
-
-                        # 确保每个漏洞都有 source 字段
-                        vuln["source"] = "ai"
+                        # 设置必需字段
+                        vuln["file"] = file_path
+                        vuln["type"] = vuln.get("type", "Unknown")
+                        vuln["severity"] = int(vuln.get("severity", 5))
+                        vuln["description"] = vuln.get("description", "No description")
+                        vuln["line_number"] = int(vuln.get("line_number", 0))
+                        vuln["risk_analysis"] = vuln.get("risk_analysis", "No risk analysis")
+                        vuln["recommendation"] = vuln.get("recommendation", "No recommendation")
+                        vuln["confidence"] = vuln.get("confidence", "medium")
+                        vuln["source"] = "grok"
 
                     # 计算整体评分
                     if "overall_score" not in result:
-                        # 根据漏洞数量和严重程度计算评分
                         vulns = result["vulnerabilities"]
                         if vulns:
-                            avg_severity = sum(
-                                v.get("severity", 5) for v in vulns
-                            ) / len(vulns)
+                            avg_severity = sum(v.get("severity", 5) for v in vulns) / len(vulns)
                             result["overall_score"] = max(0, 100 - (avg_severity * 10))
                         else:
                             result["overall_score"] = 100
@@ -217,9 +205,7 @@ class GrokProvider(AIProvider):
                     # 添加摘要
                     if "summary" not in result:
                         if result["vulnerabilities"]:
-                            result["summary"] = (
-                                f"Found {len(result['vulnerabilities'])} potential security issues"
-                            )
+                            result["summary"] = f"Found {len(result['vulnerabilities'])} potential security issues"
                         else:
                             result["summary"] = "No security issues found"
 
@@ -309,7 +295,7 @@ class GrokProvider(AIProvider):
                     "description": description,
                     "line_number": line_number,
                     "file": file_name,  # 使用正确的文件名
-                    "source": "ai",
+                    "source": "grok",
                 }
 
                 # 添加漏洞
