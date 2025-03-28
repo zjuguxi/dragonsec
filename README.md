@@ -17,7 +17,7 @@ DragonSec is an advanced security scanner that combines traditional static analy
 - **Multiple AI Models Support**:
   - OpenAI GPT-4
   - Google Gemini
-  - Deepseek R1 (Aliyun)
+  - Deepseek (via OpenRouter)
   - Grok
   - Local AI Models (via Ollama)
 
@@ -44,7 +44,7 @@ pip install dragonsec
 ```bash
 export OPENAI_API_KEY="your-openai-key"  # For OpenAI models
 export GEMINI_API_KEY="your-gemini-key"  # For Google Gemini
-export DEEPSEEK_API_KEY="your-deepseek-key"  # For Deepseek R1(Aliyun)
+export OPENROUTER_API_KEY="your-openrouter-key"  # For Deepseek via OpenRouter
 ```
 
 2. Run a scan:
@@ -55,8 +55,8 @@ dragonsec scan --path /path/to/code --mode openai --api-key $OPENAI_API_KEY
 # Using Google Gemini
 dragonsec scan --path /path/to/code --mode gemini --api-key $GEMINI_API_KEY
 
-# Using Deepseek R1 (Aliyun)
-dragonsec scan --path /path/to/code --mode deepseek --api-key $DEEPSEEK_API_KEY
+# Using Deepseek via OpenRouter
+dragonsec scan --path /path/to/code --mode deepseek --api-key $OPENROUTER_API_KEY
 
 # Using Local AI Model via Ollama
 dragonsec scan --path /path/to/code --mode local --local-url http://localhost:11434 --local-model deepseek-r1:32b
@@ -130,7 +130,7 @@ Scan Mode:
                           - semgrep (basic static analysis)
                           - openai (OpenAI enhanced)
                           - gemini (Google Gemini enhanced)
-                          - deepseek (Deepseek R1 on Aliyun)
+                          - deepseek (Deepseek via OpenRouter)
                           - local (Local AI model)
 
 Authentication:
