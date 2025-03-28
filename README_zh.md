@@ -17,9 +17,9 @@ DragonSec 是一个结合传统静态分析和 AI 驱动的代码审查的高级
 - **多 AI 模型支持**:
   - OpenAI GPT-4
   - Google Gemini
-  - Deepseek (通过 OpenRouter)
+  - Deepseek (OpenRouter)
   - Grok
-  - 本地 AI 模型 (通过 Ollama)
+  - 本地 AI 模型 (Ollama)
 
 - **静态分析**:
   - 集成 Semgrep 进行可靠的静态代码分析
@@ -51,7 +51,7 @@ pip install dragonsec
 ```bash
 export OPENAI_API_KEY="your-openai-key"  # OpenAI 模型
 export GEMINI_API_KEY="your-gemini-key"  # Google Gemini
-export OPENROUTER_API_KEY="your-openrouter-key"  # Deepseek (通过 OpenRouter)
+export OPENROUTER_API_KEY="your-openrouter-key"  # Deepseek (OpenRouter)
 ```
 
 2. 运行扫描:
@@ -62,10 +62,10 @@ dragonsec scan --path /path/to/code --mode openai --api-key $OPENAI_API_KEY
 # 使用 Google Gemini
 dragonsec scan --path /path/to/code --mode gemini --api-key $GEMINI_API_KEY
 
-# 使用 Deepseek (通过 OpenRouter)
+# 使用 Deepseek (OpenRouter)
 dragonsec scan --path /path/to/code --mode deepseek --api-key $OPENROUTER_API_KEY
 
-# 使用本地 AI 模型 (通过 Ollama)
+# 使用本地 AI 模型 (Ollama)
 dragonsec scan --path /path/to/code --mode local --local-url http://localhost:11434 --local-model deepseek-r1:32b
 
 # 仅使用 Semgrep (无需 API 密钥)
@@ -145,9 +145,9 @@ dragonsec scan [选项]
   --mode MODE              扫描模式 [默认: semgrep]
                           选项:
                           - semgrep (基础静态分析)
-                          - openai (OpenAI 增强)
-                          - gemini (Google Gemini 增强)
-                          - deepseek (Deepseek 通过 OpenRouter)
+                          - openai (OpenAI)
+                          - gemini (Google Gemini)
+                          - deepseek (Deepseek OpenRouter)
                           - local (本地 AI 模型)
 
 认证:
