@@ -1,0 +1,157 @@
+name: DragonSec Security Scan
+
+on:
+  push:
+    branches: [ main, master ]
+    paths:
+      - '**.py'
+      - '**.js'
+      - '**.java'
+      - '**.go'
+      - '**.php'
+      - 'Dockerfile'
+  pull_request:
+    branches: [ main, master ]
+    paths:
+      - '**.py'
+      - '**.js'
+      - '**.java'
+      - '**.go'
+      - '**.php'
+      - 'Dockerfile'
+
+jobs:
+  security-scan:
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      - name: Cache DragonSec
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/dragonsec
+          key: ${{ runner.os }}-dragonsec-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-dragonsec-
+
+      - name: Install DragonSec
+        run: |
+          python -m pip install --upgrade pip
+          pip install dragonsec
+
+      - name: Run DragonSec Scan
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          dragonsec scan \
+            --path . \
+            --mode openai \
+            --api-key $OPENAI_API_KEY \
+            --batch-size 4 \
+            --batch-delay 0.1 \
+            --include-tests \
+            --verbose \
+            --output-dir scan_results
+
+      - name: Upload scan results
+        uses: actions/upload-artifact@v4
+        with:
+          name: dragonsec-results
+          path: scan_results/
+          retention-days: 7
+
+      - name: Analyze scan results
+        id: analyze
+        run: |
+          python -c "
+          import json
+          import glob
+          critical = 0
+          high = 0
+          medium = 0
+          low = 0
+
+          for f in glob.glob('scan_results/*.json'):
+              with open(f) as data:
+                  results = json.load(data)
+                  for vuln in results.get('vulnerabilities', []):
+                      severity = vuln.get('severity', 0)
+                      if severity >= 8:
+                          critical += 1
+                      elif severity >= 6:
+                          high += 1
+                      elif severity >= 4:
+                          medium += 1
+                      else:
+                          low += 1
+
+          print(f'::set-output name=critical::{critical}')
+          print(f'::set-output name=high::{high}')
+          print(f'::set-output name=medium::{medium}')
+          print(f'::set-output name=low::{low}')
+
+          if critical > 0:
+              print('Critical vulnerabilities found!')
+              exit(1)
+          "
+
+      - name: Create summary
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const summary = `## DragonSec Scan Results
+
+            | Severity | Count |
+            |----------|-------|
+            | Critical | ${{ steps.analyze.outputs.critical }} |
+            | High     | ${{ steps.analyze.outputs.high }} |
+            | Medium   | ${{ steps.analyze.outputs.medium }} |
+            | Low      | ${{ steps.analyze.outputs.low }} |
+
+            Detailed results are available in the artifacts.`;
+
+            await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'DragonSec Security Scan',
+              head_sha: context.sha,
+              status: ${{ steps.analyze.outcome === 'success' ? 'success' : 'failure' }},
+              conclusion: ${{ steps.analyze.outcome === 'success' ? 'success' : 'failure' }},
+              output: {
+                title: 'Security Scan Results',
+                summary: summary
+              }
+            });
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const comment = `## DragonSec Security Scan Results
+
+            | Severity | Count |
+            |----------|-------|
+            | Critical | ${{ steps.analyze.outputs.critical }} |
+            | High     | ${{ steps.analyze.outputs.high }} |
+            | Medium   | ${{ steps.analyze.outputs.medium }} |
+            | Low      | ${{ steps.analyze.outputs.low }} |
+
+            Detailed results are available in the artifacts.`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: comment
+            });
