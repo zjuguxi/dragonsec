@@ -28,7 +28,6 @@ dependencies = [
     "requests",
     "pyyaml",
     "tenacity",
-    "pre-commit",
 ]
 
 [project.optional-dependencies]
@@ -36,10 +35,6 @@ dev = [
     "pytest",
     "pytest-asyncio",
     "pytest-cov",
-    "black",
-    "flake8",
-    "mypy",
-    "PyYAML",
     "python-dotenv"
 ]
 
