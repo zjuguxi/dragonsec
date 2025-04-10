@@ -383,62 +383,62 @@ If no vulnerabilities are found, return an empty array for "vulnerabilities" and
                 # 如果无法提取 JSON，尝试使用正则表达式提取漏洞
                 vulnerabilities = []
 
-            # 提取漏洞类型
-            vuln_types = re.findall(
-                r"(?:vulnerability|issue)(?:\s+type)?[:\s]+([A-Za-z\s_]+)",
-                response,
-                re.IGNORECASE,
-            )
-
-            # 提取严重性
-            severities = re.findall(r"severity[:\s]+(\d+)", response, re.IGNORECASE)
-
-            # 提取描述
-            descriptions = re.findall(
-                r"description[:\s]+(.*?)(?:\n|$)", response, re.IGNORECASE
-            )
-
-            # 创建漏洞对象
-            for i in range(max(len(vuln_types), len(severities), len(descriptions))):
-                vuln = {}
-
-                if i < len(vuln_types):
-                    vuln["type"] = vuln_types[i].strip()
-                else:
-                    vuln["type"] = "Unknown"
-
-                if i < len(severities):
-                    try:
-                        vuln["severity"] = int(severities[i])
-                    except ValueError:
-                        vuln["severity"] = 5  # 默认中等严重性
-                else:
-                    vuln["severity"] = 5
-
-                if i < len(descriptions):
-                    vuln["description"] = descriptions[i].strip()
-                else:
-                    vuln["description"] = "No description provided"
-
-                # 添加文件信息
-                if file_path is not None:  # 添加对 None 的检查
-                    vuln["file"] = file_path
-                    vuln["file_name"] = os.path.basename(file_path)
-                else:
-                    vuln["file"] = "unknown"
-                    vuln["file_name"] = "unknown"
-
-                vulnerabilities.append(vuln)
-
-            if vulnerabilities:
-                logger.debug(
-                    f"Extracted {len(vulnerabilities)} vulnerabilities using regex"
+                # 提取漏洞类型
+                vuln_types = re.findall(
+                    r"(?:vulnerability|issue)(?:\s+type)?[:\s]+([A-Za-z\s_]+)",
+                    response,
+                    re.IGNORECASE,
                 )
-                return {
-                    "vulnerabilities": vulnerabilities,
-                    "overall_score": 50,  # 默认中等分数
-                    "summary": "Vulnerabilities extracted from unstructured response",
-                }
+
+                # 提取严重性
+                severities = re.findall(r"severity[:\s]+(\d+)", response, re.IGNORECASE)
+
+                # 提取描述
+                descriptions = re.findall(
+                    r"description[:\s]+(.*?)(?:\n|$)", response, re.IGNORECASE
+                )
+
+                # 创建漏洞对象
+                for i in range(max(len(vuln_types), len(severities), len(descriptions))):
+                    vuln = {}
+
+                    if i < len(vuln_types):
+                        vuln["type"] = vuln_types[i].strip()
+                    else:
+                        vuln["type"] = "Unknown"
+
+                    if i < len(severities):
+                        try:
+                            vuln["severity"] = int(severities[i])
+                        except ValueError:
+                            vuln["severity"] = 5  # 默认中等严重性
+                    else:
+                        vuln["severity"] = 5
+
+                    if i < len(descriptions):
+                        vuln["description"] = descriptions[i].strip()
+                    else:
+                        vuln["description"] = "No description provided"
+
+                    # 添加文件信息
+                    if file_path is not None:  # 添加对 None 的检查
+                        vuln["file"] = file_path
+                        vuln["file_name"] = os.path.basename(file_path)
+                    else:
+                        vuln["file"] = "unknown"
+                        vuln["file_name"] = "unknown"
+
+                    vulnerabilities.append(vuln)
+
+                if vulnerabilities:
+                    logger.debug(
+                        f"Extracted {len(vulnerabilities)} vulnerabilities using regex"
+                    )
+                    return {
+                        "vulnerabilities": vulnerabilities,
+                        "overall_score": 50,  # 默认中等分数
+                        "summary": "Vulnerabilities extracted from unstructured response",
+                    }
 
             # 如果所有方法都失败，返回默认响应
             logger.warning("Could not parse response, returning default")
@@ -888,6 +888,16 @@ If no vulnerabilities are found, return an empty array for "vulnerabilities" and
                     "vulnerabilities": [],
                     "overall_score": 100,
                     "summary": "Skipped test file",
+                }
+                
+            # 检查空代码
+            if not code or code.strip() == "":
+                logger.warning(f"Empty code in file: {file_path}")
+                return {
+                    "vulnerabilities": [],
+                    "overall_score": 100,
+                    "summary": "Empty code",
+                    "error": "Empty code cannot be analyzed"
                 }
 
             # 使用 _analyze_with_ai 方法进行实际分析
