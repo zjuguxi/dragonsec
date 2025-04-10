@@ -37,8 +37,8 @@ class LocalProvider(AIProvider):
             base_url: URL for Ollama API
             model: Model name to use
         """
-        # 调用基类初始化，但不传递 API key
-        super().__init__(None)  # 传递 None 作为 API key
+        # 使用空字符串作为 API key 调用基类初始化
+        super().__init__(api_key or "")
 
         # 设置本地模式特有的属性
         self.base_url = base_url
@@ -368,35 +368,20 @@ If no vulnerabilities are found, return an empty array for "vulnerabilities" and
         Returns:
             Dict with parsed response
         """
+        from ..providers.base import parse_llm_response
+
         try:
-            # 尝试直接解析 JSON
-            try:
-                result = json.loads(response)
-                logger.debug("Response parsed as JSON")
-                return result
-            except json.JSONDecodeError:
-                # 如果直接解析失败，尝试提取 JSON 部分
-                pass
+            # 使用通用的响应解析函数
+            result = parse_llm_response(response, file_path)
 
-            # 尝试从响应中提取 JSON
-            json_match = re.search(r"```json\s*([\s\S]*?)\s*```", response)
-            if not json_match:
-                json_match = re.search(r"```\s*([\s\S]*?)\s*```", response)
+            # 添加源信息
+            for vuln in result.get("vulnerabilities", []):
+                vuln["source"] = "ai"
 
-            if json_match:
-                json_str = json_match.group(1)
-                # 修复常见的 JSON 格式问题
-                json_str = self._fix_json_format(json_str)
-
-                try:
-                    result = json.loads(json_str)
-                    logger.debug("JSON extracted from code block")
-                    return result
-                except json.JSONDecodeError as e:
-                    logger.warning(f"Error parsing JSON from code block: {e}")
-
-            # 如果无法提取 JSON，尝试使用正则表达式提取漏洞
-            vulnerabilities = []
+            # 如果解析失败，尝试使用正则表达式提取漏洞
+            if not result.get("vulnerabilities") and "Failed to parse response" in result.get("summary", ""):
+                # 如果无法提取 JSON，尝试使用正则表达式提取漏洞
+                vulnerabilities = []
 
             # 提取漏洞类型
             vuln_types = re.findall(
@@ -461,6 +446,7 @@ If no vulnerabilities are found, return an empty array for "vulnerabilities" and
 
         except Exception as e:
             logger.error(f"Error parsing response: {e}")
+            import traceback
             traceback.print_exc()
             return self._get_default_response()
 
@@ -525,7 +511,7 @@ If no vulnerabilities are found, return an empty array for "vulnerabilities" and
                 vuln["severity"] = int(vuln.get("severity", 5))
                 vuln["description"] = vuln.get("description", "No description")
                 vuln["line_number"] = int(vuln.get("line_number", 0))
-                
+
                 # 设置可选字段
                 vuln["risk_analysis"] = vuln.get("risk_analysis", "No risk analysis")
                 vuln["recommendation"] = vuln.get("recommendation", "No recommendation")

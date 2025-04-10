@@ -175,17 +175,16 @@ async def test_scan_with_ai(mock_analyze, sample_file_path):
     # Set mock return value
     mock_analyze.return_value = {"vulnerabilities": [], "overall_score": 100}
 
-    with patch("dragonsec.providers.base.AIProvider._secure_api_key") as mock_secure:
-        mock_secure.return_value = "test_key_1234567890123456789012345678901"
-        scanner = SecurityScanner(
-            mode=ScanMode.OPENAI, api_key="test_key_1234567890123456789012345678901"
-        )
-        results = await scanner.scan_directory(str(sample_file_path))
+    # 直接创建 SecurityScanner 实例
+    scanner = SecurityScanner(
+        mode=ScanMode.OPENAI, api_key="test_key_1234567890123456789012345678901"
+    )
+    results = await scanner.scan_directory(str(sample_file_path))
 
-        assert isinstance(results, dict)
-        assert "vulnerabilities" in results
-        assert "summary" in results
-        assert "overall_score" in results
+    assert isinstance(results, dict)
+    assert "vulnerabilities" in results
+    assert "summary" in results
+    assert "overall_score" in results
 
 
 @pytest.mark.asyncio

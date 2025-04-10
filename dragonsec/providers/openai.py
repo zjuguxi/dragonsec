@@ -2,7 +2,7 @@ from openai import AsyncOpenAI
 from typing import List, Dict, Any, Optional
 import json
 from pathlib import Path
-from .base import AIProvider
+from .base import AIProvider, handle_api_errors
 import asyncio
 from tenacity import retry, stop_after_attempt, wait_exponential
 import logging
@@ -19,15 +19,21 @@ class OpenAIProvider(AIProvider):
             base_url (str, optional): Custom API endpoint
             model (str, optional): Model to use. Defaults to "gpt-4"
         """
-        # API key should be provided at runtime, not hardcoded
-        super().__init__(api_key=api_key)
+        # 调用基类初始化
+        super().__init__(api_key)
 
-        # Initialize client with runtime credentials
-        self.client = (
-            AsyncOpenAI(api_key=self.api_key, base_url=base_url)
-            if base_url
-            else AsyncOpenAI(api_key=self.api_key)
-        )
+        # 初始化客户端配置
+        client_config = {
+            "api_key": self.api_key,
+            "timeout": 60.0,
+            "max_retries": 3
+        }
+        
+        if base_url:
+            client_config["base_url"] = base_url
+            
+        # 创建 OpenAI 客户端
+        self.client = AsyncOpenAI(**client_config)
         self.model = model
         self.context_cache = {}
         self.SYSTEM_PROMPT = """
@@ -152,25 +158,27 @@ class OpenAIProvider(AIProvider):
         except Exception:
             return Path(file_path).name
 
+    # 安全相关术语集合
+    SECURITY_TERMS = {
+        "crypto",
+        "security",
+        "auth",
+        "jwt",
+        "bcrypt",
+        "hash",
+        "password",
+        "ssl",
+        "tls",
+        "https",
+        "oauth",
+    }
+
     def _filter_relevant_deps(self, deps: Dict[str, str]) -> Dict[str, str]:
         """Filter security-related dependencies"""
-        security_related = {
-            "crypto",
-            "security",
-            "auth",
-            "jwt",
-            "bcrypt",
-            "hash",
-            "password",
-            "ssl",
-            "tls",
-            "https",
-            "oauth",
-        }
         return {
             k: v
             for k, v in deps.items()
-            if any(term in k.lower() for term in security_related)
+            if any(term in k.lower() for term in self.SECURITY_TERMS)
         }
 
     def _simplify_structure(self, structure: Dict) -> Dict:
@@ -204,50 +212,20 @@ class OpenAIProvider(AIProvider):
         self, imports: List[str], max_imports: int = 5
     ) -> List[str]:
         """Filter most relevant imports"""
-        security_related = {
-            "crypto",
-            "security",
-            "auth",
-            "jwt",
-            "bcrypt",
-            "hash",
-            "password",
-            "ssl",
-            "tls",
-            "https",
-        }
-
         relevant = [
             imp
             for imp in imports
-            if any(term in imp.lower() for term in security_related)
+            if any(term in imp.lower() for term in self.SECURITY_TERMS)
         ]
         return relevant[:max_imports]
 
-    def _get_default_response(self) -> Dict:
-        """Get default response when analysis fails"""
-        return {
-            "vulnerabilities": [],
-            "overall_score": 0,
-            "summary": "Failed to analyze code",
-        }
+    # 使用基类的 _get_default_response 方法
 
     def _find_project_root(self, file_path: str) -> Optional[str]:
         """Find project root directory"""
-        current = Path(file_path).parent
-        root_indicators = {
-            ".git",
-            "package.json",
-            "setup.py",
-            "pom.xml",
-            "build.gradle",
-        }
-
-        while current != current.parent:
-            if any((current / indicator).exists() for indicator in root_indicators):
-                return str(current)
-            current = current.parent
-        return None
+        from ..utils.file_utils import FileContext
+        context = FileContext()
+        return context.find_project_root(file_path)
 
     def _convert_semgrep_severity(self, severity: str) -> int:
         """Convert semgrep severity to numeric scale"""
@@ -262,27 +240,7 @@ class OpenAIProvider(AIProvider):
         }
         return severity_map.get(severity, 5)
 
-    def _calculate_security_score(self, vulnerabilities: List[Dict]) -> int:
-        """Calculate security score based on vulnerabilities"""
-        if not vulnerabilities:
-            return 100
-
-        score = 100
-        severity_weights = {
-            range(9, 11): 15,  # Critical: -15 points each
-            range(7, 9): 10,  # High: -10 points each
-            range(4, 7): 5,  # Medium: -5 points each
-            range(1, 4): 2,  # Low: -2 points each
-        }
-
-        for vuln in vulnerabilities:
-            severity = vuln.get("severity", 5)
-            for severity_range, weight in severity_weights.items():
-                if severity in severity_range:
-                    score -= weight
-                    break
-
-        return max(0, min(100, score))
+    # 使用基类的 _calculate_security_score 方法
 
     def _prepare_prompt(self, code: str, context: Dict) -> str:
         """Prepare the prompt for OpenAI analysis"""
@@ -322,47 +280,31 @@ class OpenAIProvider(AIProvider):
 
     async def _parse_response(self, result: str) -> Dict:
         """Parse response from OpenAI"""
-        try:
-            parsed = json.loads(result)
-            if "vulnerabilities" not in parsed:
-                return self._get_default_response()
+        from ..providers.base import parse_llm_response
 
-            # 确保所有漏洞都有完整的字段
-            for vuln in parsed.get("vulnerabilities", []):
-                # 设置必需字段
-                vuln["type"] = vuln.get("type", "Unknown")
-                vuln["severity"] = int(vuln.get("severity", 5))
-                vuln["description"] = vuln.get("description", "No description")
-                vuln["line_number"] = int(vuln.get("line_number", 0))
-                vuln["file"] = vuln.get("file", "unknown")
-                vuln["risk_analysis"] = vuln.get("risk_analysis", "No risk analysis")
-                vuln["recommendation"] = vuln.get("recommendation", "No recommendation")
-                vuln["confidence"] = vuln.get("confidence", "medium")
-                vuln["source"] = "openai"
+        # 使用通用的响应解析函数
+        parsed = parse_llm_response(result)
 
-            return parsed
+        # 添加源信息
+        for vuln in parsed.get("vulnerabilities", []):
+            vuln["source"] = "openai"
 
-        except Exception as e:
-            logger.error(f"Error parsing OpenAI response: {e}")
-            return self._get_default_response()
+        return parsed
 
+    @handle_api_errors
     async def _call_api(self, prompt: str) -> str:
         """Call OpenAI API"""
-        try:
-            completion = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a security code analyzer...",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-            )
-            return completion.choices[0].message.content
-        except Exception as e:
-            logger.error(f"API call failed: {e}")
-            raise
+        completion = await self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a security code analyzer...",
+                },
+                {"role": "user", "content": prompt},
+            ],
+        )
+        return completion.choices[0].message.content
 
     def _build_prompt(self, code: str, file_path: str, context: Dict = None) -> str:
         """Build prompt for code analysis"""
@@ -391,28 +333,24 @@ Provide your analysis in the following JSON format:
 }}
 """
 
+    @handle_api_errors
     async def _analyze_with_ai(
         self, code: str, file_path: str, context: Dict = None
     ) -> Dict:
         """OpenAI-specific implementation"""
+        response = await self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": self._get_system_prompt()},
+                {"role": "user", "content": f"Analyze this code:\n\n{code}"},
+            ],
+        )
+
+        content = response.choices[0].message.content
+        logger.debug(f"Raw response content: {content}")
+
         try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": self._get_system_prompt()},
-                    {"role": "user", "content": f"Analyze this code:\n\n{code}"},
-                ],
-            )
-
-            content = response.choices[0].message.content
-            logger.debug(f"Raw response content: {content}")
-
-            try:
-                return json.loads(content)
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse response as JSON: {e}")
-                return self._get_default_response()
-
-        except Exception as e:
-            logger.error(f"Error calling OpenAI API: {e}")
+            return json.loads(content)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse response as JSON: {e}")
             return self._get_default_response()

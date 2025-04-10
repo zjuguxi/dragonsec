@@ -1,18 +1,110 @@
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional, Callable, TypeVar, cast
 import logging
 import json
 import os
 import re
 import time
+import functools
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+# 定义类型变量用于装饰器
+T = TypeVar('T')
+
+
+def create_error_response(error_msg: str, score: int = 100, include_metadata: bool = False) -> Dict:
+    """创建通用的错误响应
+
+    Args:
+        error_msg: 错误消息
+        score: 安全分数，默认为 100
+        include_metadata: 是否包含元数据
+
+    Returns:
+        错误响应字典
+    """
+    response = {
+        "vulnerabilities": [],
+        "overall_score": score,
+        "summary": error_msg,
+        "error": error_msg
+    }
+
+    if include_metadata:
+        response["metadata"] = {
+            "files_scanned": 0,
+            "skipped_files": 0,
+            "scan_duration": 0,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "error": error_msg
+        }
+
+    return response
+
+
+def handle_api_errors(func: Callable[..., T]) -> Callable[..., T]:
+    """装饰器：处理 API 调用错误
+
+    Args:
+        func: 要装饰的函数
+
+    Returns:
+        装饰后的函数
+    """
+    @functools.wraps(func)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await func(*args, **kwargs)
+        except Exception as e:
+            # 获取类实例（self）
+            instance = args[0] if args else None
+
+            # 记录错误
+            logger.error(f"API call error in {func.__name__}: {e}")
+
+            # 如果实例有 _get_default_response 方法，使用它
+            if instance and hasattr(instance, '_get_default_response'):
+                return instance._get_default_response()
+
+            # 否则返回通用错误响应
+            return create_error_response(f"API call failed: {str(e)}")
+
+    return cast(Callable[..., T], wrapper)
 
 
 class AIProvider(ABC):
     """Base class for AI providers with common security analysis logic"""
 
+    # 安全相关术语集合
+    SECURITY_TERMS = {
+        "crypto",
+        "security",
+        "auth",
+        "jwt",
+        "bcrypt",
+        "hash",
+        "password",
+        "ssl",
+        "tls",
+        "https",
+        "oauth",
+    }
+
+    def _fix_json_format(self, json_str: str) -> str:
+        """Fix common JSON format issues"""
+        return fix_json_format(json_str)
+    
     def __init__(self, api_key: str):
+        """Initialize the AI provider
+
+        Args:
+            api_key: API key for the provider
+        """
+        # 调用 ABC 的 __init__ 方法 - 不传递参数
+        super().__init__()
+
         self.required_fields = [
             "type",
             "severity",
@@ -34,8 +126,10 @@ class AIProvider(ABC):
             "/fixtures/",
             "/conftest.py",
         ]
+        
+        # 添加基础系统提示词
         self.base_system_prompt = """
-        You are a security expert. Analyze the code for security vulnerabilities.
+        You are a security expert analyzing code for vulnerabilities.
         Focus ONLY on critical security issues that could lead to:
         1. Remote Code Execution (RCE)
         2. SQL Injection
@@ -44,8 +138,8 @@ class AIProvider(ABC):
         5. Path Traversal with actual file access
         6. Authentication Bypass
         7. Direct Object References (IDOR)
-        8. Hardcoded Production Credentials (like API keys, passwords)
-
+        8. Hardcoded Production Credentials
+        
         DO NOT report:
         - Dependencies or version issues
         - Logging concerns
@@ -54,145 +148,30 @@ class AIProvider(ABC):
         - Framework-level security patterns
         - Theoretical vulnerabilities
         - Code style issues
-        - Business logic issues (like trading strategies)
+        - Business logic issues
         - Performance test scripts
-        - Example code
-        - Demo applications
-        - Benchmark scripts
-
-        Context awareness:
-        - Performance/benchmark scripts are not production code
-        - Test scripts are not security issues
-        - Trading strategy logic is not a security concern
-        - Example code is not production code
-
-        Context awareness for deserialization:
-        NEVER report pickle usage in these scenarios (no exceptions):
-        1. Data tooling:
-           - Data generation scripts
-           - Data loading utilities
-           - Data preparation tools
-           - Data conversion tools
-           - Data bundling tools
-
-        2. Internal data:
-           - System generated files
-           - Configuration files
-           - Cache files
-           - State files
-           - Temporary data
-
-        3. Development tools:
-           - Build scripts
-           - Setup tools
-           - Test utilities
-           - Benchmark tools
-           - Analysis tools
-
-        ONLY report when ALL of these are true:
-        1. External attack surface exists:
-           - Public web endpoint
-           - Network service
-           - Public API
-        2. Direct user input:
-           - File uploads
-           - Network requests
-           - User-provided data
-        3. No security controls:
-           - No input validation
-           - No access controls
-           - No environment isolation
-
-        If ANY of the DO NOT REPORT conditions are met,
-        the finding should be skipped completely,
-        regardless of other factors.
-
-        Rate severity based on context:
-        - Critical (9-10): Web/API endpoints accepting user data
-        - High (7-8): Network services with external input
-        - Medium (5-6): Internal services with indirect exposure
-        - Low (3-4): Internal tools with controlled input
-        - Info (1-2): Developer utilities with trusted data
-
-        Respond with valid JSON only, using this structure:
-        {
-            "vulnerabilities": [
-                {
-                    "type": "vulnerability type",
-                    "severity": 1-10,
-                    "description": "detailed description",
-                    "line_number": line number,
-                    "file": "full file path",
-                    "risk_analysis": "specific attack scenarios and impact",
-                    "recommendation": "concrete fix suggestions",
-                    "confidence": "high|medium|low",
-                    "source": "provider_name"
-                }
-            ],
-            "overall_score": 0-100,
-            "summary": "brief security assessment"
-        }
-
-        All fields are required. If any field is missing, use these default values:
-        - type: "Unknown"
-        - severity: 5
-        - description: "No description"
-        - line_number: 0
-        - risk_analysis: "No risk analysis"
-        - recommendation: "No recommendation"
-        - confidence: "medium"
-        - source: must be the specific provider name (e.g., "deepseek", "grok", "openai", "gemini", "local")
-
-        Severity guidelines:
-        10: Critical - Remote code execution, data breach
-        8-9: High - Authentication bypass, SQL injection
-        6-7: Medium - Information disclosure, DoS
-        4-5: Low - Limited impact vulnerabilities
-        1-3: Info - Minor security concerns
-
-        Context awareness for credentials:
-        DO NOT report when:
-        - Credentials are passed as parameters
-        - Keys are loaded from environment variables
-        - Using standard credential management
-        - Configuration objects handle secrets
-        - Base classes process credentials
-
-        ONLY report when:
-        1. Actual secret values are hardcoded
-        2. Credentials are stored in plain text
-        3. Production keys are committed
-        4. Default passwords are used
-
-        For path traversal:
-        DO NOT report when:
-        - Tool is CLI-only
-        - No network exposure
-        - Used by developers only
-        - Has path validation
-        - Uses Path.resolve()
-        - Checks against root directory
-        - Has logging and error handling
-
-        ONLY report path traversal when:
-        1. Exposed via web/API endpoints
-        2. Accepts network input
-        3. No path validation
-        4. Direct file system access
-        5. Public facing service
-
-        Rate severity based on exposure:
-        - Critical (9-10): Public web/API endpoints
-        - High (7-8): Network services
-        - Medium (5-6): Web admin tools
-        - Low (3-4): Internal CLI tools
-        - Info (1-2): Developer utilities
         """
 
     def _secure_api_key(self, api_key: str) -> str:
-        """Validate and secure API key"""
-        if not api_key or not isinstance(api_key, str):
-            raise ValueError("API key is required")
+        """Secure API key handling
+
+        Args:
+            api_key: The API key to secure
+
+        Returns:
+            The secured API key
+        """
+        if not api_key:
+            logger.warning("No API key provided")
+            return ""
+
+        # Remove any whitespace
+        api_key = api_key.strip()
+
+        # Basic validation
+        if len(api_key) < 3:  # Minimal validation for tests
+            logger.warning("API key seems too short")
+
         return api_key
 
     @abstractmethod
@@ -204,11 +183,7 @@ class AIProvider(ABC):
 
     def _get_default_response(self) -> Dict:
         """Get default response when analysis fails"""
-        return {
-            "vulnerabilities": [],
-            "overall_score": 100,
-            "summary": "Failed to analyze code",
-        }
+        return create_error_response("Failed to analyze code")
 
     @property
     def system_prompt(self) -> str:
@@ -262,12 +237,34 @@ class AIProvider(ABC):
             logger.error(f"Error standardizing vulnerability: {e}")
             return None
 
-    def _calculate_score(self, vulnerabilities: List[Dict]) -> int:
-        """Calculate overall security score"""
+    def _calculate_security_score(self, vulnerabilities: List[Dict]) -> int:
+        """Calculate overall security score based on vulnerabilities
+
+        Args:
+            vulnerabilities: List of vulnerability dictionaries
+
+        Returns:
+            Security score from 0 to 100
+        """
         if not vulnerabilities:
             return 100
-        max_severity = max(v["severity"] for v in vulnerabilities)
-        return max(0, 100 - (max_severity * 10))
+
+        score = 100
+        severity_weights = {
+            range(9, 11): 15,  # Critical: -15 points each
+            range(7, 9): 10,   # High: -10 points each
+            range(4, 7): 5,    # Medium: -5 points each
+            range(1, 4): 2,    # Low: -2 points each
+        }
+
+        for vuln in vulnerabilities:
+            severity = vuln.get("severity", 5)
+            for severity_range, weight in severity_weights.items():
+                if severity in severity_range:
+                    score -= weight
+                    break
+
+        return max(0, min(100, score))
 
     def _is_test_file(self, file_path: str) -> bool:
         """检查是否为测试文件"""
@@ -554,26 +551,6 @@ Remember: Your response MUST be in English only.
 
         return prompt
 
-    def _fix_json_format(self, json_str: str) -> str:
-        """Fix common JSON format issues"""
-        # 修复缺少引号的键
-        json_str = re.sub(
-            r"([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:", r'\1"\2":', json_str
-        )
-
-        # 修复单引号
-        json_str = json_str.replace("'", '"')
-
-        # 修复尾部逗号
-        json_str = re.sub(r",\s*}", "}", json_str)
-        json_str = re.sub(r",\s*]", "]", json_str)
-
-        # 修复缺少值的情况
-        json_str = re.sub(r":\s*,", ": null,", json_str)
-        json_str = re.sub(r":\s*}", ": null}", json_str)
-
-        return json_str
-
     async def deep_audit_vulnerabilities(
         self, scan_result: Dict, file_contents: Dict = None
     ) -> Dict:
@@ -721,3 +698,199 @@ Focus on providing actionable insights and practical recommendations.
 """
 
         return prompt
+
+def fix_json_format(json_str: str) -> str:
+    """修复常见的 JSON 格式问题
+
+    Args:
+        json_str: 要修复的 JSON 字符串
+
+    Returns:
+        修复后的 JSON 字符串
+    """
+    try:
+        # 首先尝试直接解析
+        json.loads(json_str)
+        return json_str
+    except json.JSONDecodeError:
+        # 如果解析失败，尝试修复
+        pass
+
+    # 修复缺少引号的键
+    json_str = re.sub(
+        r"([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:", r'\1"\2":', json_str
+    )
+
+    # 修复单引号
+    json_str = json_str.replace("'", '"')
+
+    # 修复尾部逗号
+    json_str = re.sub(r",\s*}", "}", json_str)
+    json_str = re.sub(r",\s*]", "]", json_str)
+
+    # 修复缺少值的情况
+    json_str = re.sub(r":\s*,", ": null,", json_str)
+    json_str = re.sub(r":\s*}", ": null}", json_str)
+
+    # 修复多余的逗号
+    json_str = re.sub(r",\s*,", ",", json_str)
+
+    # 修复缺少逗号的情况
+    json_str = re.sub(r"}\s*{", "},{", json_str)
+    json_str = re.sub(r"}\s*\[", "},[", json_str)
+    json_str = re.sub(r"]\s*\[", "],[", json_str)
+
+    # 修复不匹配的引号
+    open_quotes = []
+    in_string = False
+    escaped = False
+    for i, char in enumerate(json_str):
+        if char == "\\":
+            escaped = not escaped
+        elif char == '"' and not escaped:
+            in_string = not in_string
+            if in_string:
+                open_quotes.append(i)
+            else:
+                if open_quotes:
+                    open_quotes.pop()
+        else:
+            escaped = False
+
+    # 闭合所有未闭合的引号
+    for i in reversed(open_quotes):
+        next_delimiter = json_str.find(",", i)
+        next_brace = json_str.find("}", i)
+        next_bracket = json_str.find("]", i)
+
+        delimiters = [
+            d for d in [next_delimiter, next_brace, next_bracket] if d != -1
+        ]
+        if delimiters:
+            next_pos = min(delimiters)
+            json_str = json_str[:next_pos] + '"' + json_str[next_pos:]
+        else:
+            json_str += '"'
+
+    # 尝试解析修复后的 JSON
+    try:
+        json.loads(json_str)
+        return json_str
+    except json.JSONDecodeError as e:
+        # 如果仍然失败，尝试提取 JSON 结构
+        try:
+            start = json_str.find("{")
+            end = json_str.rfind("}")
+
+            if start != -1 and end != -1 and start < end:
+                json_obj = json_str[start : end + 1]
+                json_obj = re.sub(
+                    r"([{,]\s*)([a-zA-Z_][a-zA-Z0-9_]*)\s*:",
+                    r'\1"\2":',
+                    json_obj,
+                )
+
+                try:
+                    json.loads(json_obj)
+                    return json_obj
+                except json.JSONDecodeError:
+                    pass
+        except Exception:
+            pass
+
+        # 如果所有尝试都失败，返回原始字符串
+        logger.warning("Failed to fix JSON format")
+        return json_str
+
+
+def extract_json_from_text(text: str) -> str:
+    """从文本中提取 JSON
+
+    Args:
+        text: 包含 JSON 的文本
+
+    Returns:
+        提取的 JSON 字符串
+    """
+    # 尝试从代码块中提取 JSON
+    json_match = re.search(r"```json\s*([\s\S]*?)\s*```", text)
+    if not json_match:
+        json_match = re.search(r"```\s*([\s\S]*?)\s*```", text)
+
+    if json_match:
+        return json_match.group(1)
+
+    # 如果没有代码块，尝试直接提取 JSON 对象
+    json_start = text.find("{")
+    json_end = text.rfind("}")
+
+    if json_start != -1 and json_end != -1 and json_start < json_end:
+        return text[json_start:json_end + 1]
+
+    # 如果没有找到 JSON，返回原始文本
+    return text
+
+
+def parse_llm_response(response: str, file_path: str = None) -> Dict:
+    """解析 LLM 响应
+
+    Args:
+        response: LLM 响应文本
+        file_path: 可选的文件路径，用于添加到漏洞信息中
+
+    Returns:
+        解析后的响应字典
+    """
+    try:
+        # 提取 JSON
+        json_str = extract_json_from_text(response)
+
+        # 修复 JSON 格式
+        json_str = fix_json_format(json_str)
+
+        # 解析 JSON
+        try:
+            result = json.loads(json_str)
+        except json.JSONDecodeError:
+            logger.warning("Failed to parse JSON response")
+            return create_error_response("Failed to parse response")
+
+        # 标准化结果
+        if not isinstance(result, dict):
+            result = {"vulnerabilities": []}
+
+        if "vulnerabilities" not in result:
+            result["vulnerabilities"] = []
+
+        # 标准化漏洞信息
+        for vuln in result["vulnerabilities"]:
+            if file_path and "file" not in vuln:
+                vuln["file"] = file_path
+
+            vuln["type"] = vuln.get("type", "Unknown")
+            vuln["severity"] = int(vuln.get("severity", 5))
+            vuln["description"] = vuln.get("description", "No description")
+            vuln["line_number"] = int(vuln.get("line_number", 0))
+            vuln["risk_analysis"] = vuln.get("risk_analysis", "No risk analysis")
+            vuln["recommendation"] = vuln.get("recommendation", "No recommendation")
+            vuln["confidence"] = vuln.get("confidence", "medium")
+
+        # 添加摘要
+        if "summary" not in result:
+            if result["vulnerabilities"]:
+                result["summary"] = f"Found {len(result['vulnerabilities'])} potential security issues"
+            else:
+                result["summary"] = "No security issues found"
+
+        # 添加安全评分
+        if "overall_score" not in result and "vulnerabilities" in result:
+            result["overall_score"] = 100
+            if result["vulnerabilities"]:
+                avg_severity = sum(v.get("severity", 5) for v in result["vulnerabilities"]) / len(result["vulnerabilities"])
+                result["overall_score"] = max(0, 100 - (avg_severity * 10))
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Error parsing response: {e}")
+        return create_error_response(f"Error parsing response: {str(e)}")

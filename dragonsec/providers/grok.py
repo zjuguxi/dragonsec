@@ -14,9 +14,20 @@ logger = logging.getLogger(__name__)
 class GrokProvider(AIProvider):
     """Grok AI provider for code analysis"""
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, base_url: str = None):
         super().__init__(api_key)
-        self.client = AsyncOpenAI(api_key=api_key, base_url="https://api.x.ai/v1")
+        os.environ['HTTP_PROXY'] = ''
+        os.environ['HTTPS_PROXY'] = ''
+        os.environ['NO_PROXY'] = 'api.x.ai'
+        
+        client_config = {
+            'api_key': api_key,
+            'timeout': 60.0,
+            'max_retries': 3,
+            'base_url': base_url or 'https://api.x.ai/v1'
+        }
+        
+        self.client = AsyncOpenAI(**client_config)
         self.model = "grok-2-latest"
 
     @property
@@ -119,13 +130,7 @@ class GrokProvider(AIProvider):
             logger.error(f"Error calling Grok API: {e}")
             return self._get_default_response()
 
-    def _calculate_security_score(self, vulnerabilities: List[Dict]) -> float:
-        """Calculate security score based on vulnerabilities"""
-        if not vulnerabilities:
-            return 100.0
-        # 使用最高严重性作为基准
-        max_severity = max(v.get("severity", 0) for v in vulnerabilities)
-        return max(0, 100 - (max_severity * 10))
+    # 使用基类的 _calculate_security_score 方法
 
     def merge_results(self, semgrep_results: List[Dict], ai_results: Dict) -> Dict:
         """Merge semgrep and AI results"""
@@ -164,57 +169,21 @@ class GrokProvider(AIProvider):
         Returns:
             Parsed response with vulnerabilities
         """
+        from ..providers.base import parse_llm_response
+
         try:
-            # 尝试解析 JSON 响应
-            try:
-                # 查找 JSON 块
-                json_match = re.search(r"```json\s*(.*?)\s*```", response, re.DOTALL)
-                if json_match:
-                    json_str = json_match.group(1)
-                    result = json.loads(json_str)
+            # 使用通用的响应解析函数
+            result = parse_llm_response(response, file_path)
 
-                    # 确保结果包含必要的字段
-                    if not isinstance(result, dict):
-                        result = {"vulnerabilities": []}
-
-                    if "vulnerabilities" not in result:
-                        result["vulnerabilities"] = []
-
-                    # 标准化每个漏洞对象
-                    for vuln in result["vulnerabilities"]:
-                        # 设置必需字段
-                        vuln["file"] = file_path
-                        vuln["type"] = vuln.get("type", "Unknown")
-                        vuln["severity"] = int(vuln.get("severity", 5))
-                        vuln["description"] = vuln.get("description", "No description")
-                        vuln["line_number"] = int(vuln.get("line_number", 0))
-                        vuln["risk_analysis"] = vuln.get("risk_analysis", "No risk analysis")
-                        vuln["recommendation"] = vuln.get("recommendation", "No recommendation")
-                        vuln["confidence"] = vuln.get("confidence", "medium")
-                        vuln["source"] = "grok"
-
-                    # 计算整体评分
-                    if "overall_score" not in result:
-                        vulns = result["vulnerabilities"]
-                        if vulns:
-                            avg_severity = sum(v.get("severity", 5) for v in vulns) / len(vulns)
-                            result["overall_score"] = max(0, 100 - (avg_severity * 10))
-                        else:
-                            result["overall_score"] = 100
-
-                    # 添加摘要
-                    if "summary" not in result:
-                        if result["vulnerabilities"]:
-                            result["summary"] = f"Found {len(result['vulnerabilities'])} potential security issues"
-                        else:
-                            result["summary"] = "No security issues found"
-
-                    return result
-            except json.JSONDecodeError:
-                logger.warning("Failed to parse JSON response")
+            # 添加源信息
+            for vuln in result.get("vulnerabilities", []):
+                vuln["source"] = "grok"
 
             # 如果 JSON 解析失败，尝试文本分析
-            return self._analyze_text_response(response, file_path)
+            if not result.get("vulnerabilities") and "Failed to parse response" in result.get("summary", ""):
+                return self._analyze_text_response(response, file_path)
+
+            return result
 
         except Exception as e:
             logger.error(f"Error parsing response: {e}")

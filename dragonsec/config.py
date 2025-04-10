@@ -3,6 +3,15 @@
 from pathlib import Path
 import os
 
+# 项目根目录指示器
+ROOT_INDICATORS = {
+    ".git",
+    "package.json",
+    "setup.py",
+    "pom.xml",
+    "build.gradle",
+}
+
 # 基础配置
 DEFAULT_CONFIG = {
     # 文件选择
@@ -29,6 +38,8 @@ DEFAULT_CONFIG = {
     # 日志配置
     "log_level": "INFO",
     "log_format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    # 项目根目录指示器
+    "root_indicators": ROOT_INDICATORS,
 }
 
 # Add debug logging configuration

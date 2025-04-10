@@ -29,19 +29,23 @@ class DeepseekProvider(AIProvider):
             api_key: OpenRouter API key
         """
         super().__init__(api_key)
-        self.client = AsyncOpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=self.api_key,
-        )
+        
+        # 初始化客户端配置
+        client_config = {
+            "api_key": self.api_key,
+            "base_url": "https://openrouter.ai/api/v1",
+            "timeout": 60.0,
+            "max_retries": 3
+        }
+        
+        # 创建 OpenAI 客户端
+        self.client = AsyncOpenAI(**client_config)
+        
         self.model = "deepseek/deepseek-coder-33b-instruct"
-        self.timeout = httpx.Timeout(60.0)
-        self.max_retries = 3
         self.concurrent_limit = 2
         self.batch_delay = 1.0
 
-    def _get_default_response(self) -> Dict:
-        """Get default response when analysis fails"""
-        return {"vulnerabilities": [], "overall_score": 0, "summary": "Analysis failed"}
+    # 使用基类的 _get_default_response 方法
 
     async def analyze_code(
         self, code: str, language: str = "python"
@@ -368,7 +372,7 @@ class DeepseekProvider(AIProvider):
                 content = completion["choices"][0]["message"]["content"]
                 # Parse the JSON response
                 analysis = json.loads(content)
-                
+
                 # 确保所有漏洞都有完整的字段
                 if "vulnerabilities" in analysis:
                     for vuln in analysis["vulnerabilities"]:
@@ -382,7 +386,7 @@ class DeepseekProvider(AIProvider):
                         vuln["recommendation"] = vuln.get("recommendation", "No recommendation")
                         vuln["confidence"] = vuln.get("confidence", "medium")
                         vuln["source"] = "deepseek"
-                
+
                 return analysis
             except (KeyError, json.JSONDecodeError) as e:
                 logger.error(f"Error parsing Deepseek response: {e}")

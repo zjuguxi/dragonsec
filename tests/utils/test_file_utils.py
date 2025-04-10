@@ -195,7 +195,7 @@ def test_get_project_structure(tmp_path):
 
     context = FileContext()
     context.set_scan_root(str(project_dir))
-    structure = context.get_project_structure(str(project_dir))
+    structure = context.get_project_structure()
 
     assert "src" in structure
     assert "tests" in structure
@@ -227,7 +227,7 @@ pytest==7.0.0
 
     context = FileContext()
     context.set_scan_root(str(project_dir))
-    deps = context.analyze_dependencies(str(project_dir))
+    deps = context.analyze_dependencies()
 
     assert "requests" in deps
     assert "pytest" in deps

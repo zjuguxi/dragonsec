@@ -6,11 +6,8 @@ from unittest.mock import AsyncMock, patch
 @pytest.fixture
 def openai_provider():
     """Create a test instance of OpenAIProvider"""
-    with patch("dragonsec.providers.base.AIProvider._secure_api_key") as mock_secure:
-        mock_secure.return_value = (
-            "test_key_1234567890123456789012345678901"  # 32 characters
-        )
-        return OpenAIProvider("test_key_1234567890123456789012345678901")
+    # 直接创建 OpenAIProvider 实例
+    return OpenAIProvider("test_key_1234567890123456789012345678901")
 
 
 @pytest.mark.asyncio

@@ -13,13 +13,8 @@ class FileContext:
     """File context manager for security scanning"""
 
     def __init__(self, file_path: Optional[str] = None):
-        self.root_indicators = {
-            ".git",
-            "package.json",
-            "setup.py",
-            "pom.xml",
-            "build.gradle",
-        }
+        from ..config import ROOT_INDICATORS
+        self.root_indicators = ROOT_INDICATORS
         self._scan_root = None
         self._allowed_paths = set()
         self._imports = []  # Add import list
@@ -113,15 +108,13 @@ class FileContext:
 
             # Check if it's a binary file
             try:
-                with open(path, "rb") as f:
-                    is_binary = b"\0" in f.read(1024)
-                    if is_binary:
-                        return {
-                            "content": "",
-                            "imports": [],
-                            "related_files": [],
-                            "error": "Binary file detected",
-                        }
+                if self.is_binary_file(str(path)):
+                    return {
+                        "content": "",
+                        "imports": [],
+                        "related_files": [],
+                        "error": "Binary file detected",
+                    }
             except Exception as e:
                 return self._get_error_response(f"Error reading file: {e}")
 
@@ -232,13 +225,30 @@ class FileContext:
             logger.error(f"Error analyzing imports: {e}")
             return []
 
-    def find_related_files(self, file_path: str) -> List[str]:
+    def find_related_files(self, file_path: str, max_files: int = 5) -> List[str]:
+        """Find files related to the given file based on imports
+
+        Args:
+            file_path: Path to the file
+            max_files: Maximum number of related files to return
+
+        Returns:
+            List of related file paths
+        """
         try:
             path = Path(file_path).resolve()
             scan_root = self._get_scan_root()
 
+            # Skip binary files
+            if self.is_binary_file(str(path)):
+                return []
+
             # Get file content
-            content = path.read_text(encoding="utf-8")
+            try:
+                content = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                logger.warning(f"Cannot decode file as UTF-8: {file_path}")
+                return []
 
             # Analyze import statements
             imports = self.analyze_imports(content)
@@ -254,12 +264,17 @@ class FileContext:
                         if p.is_file() and p != path:
                             related.append(str(p))
 
-            return related[:5]  # Limit return count
+            return related[:max_files]  # Limit return count
         except Exception as e:
             logger.error(f"Error finding related files: {e}")
             return []
 
-    def get_project_structure(self, root_dir: str) -> Dict[str, List[str]]:
+    def get_project_structure(self) -> Dict[str, List[str]]:
+        """Get project structure
+
+        Returns:
+            Dictionary mapping directories to lists of files
+        """
         # Use scan root directory
         scan_root = self._get_scan_root()
         structure = {}
@@ -272,7 +287,12 @@ class FileContext:
                 structure[rel_path] = files
         return structure
 
-    def analyze_dependencies(self, root_dir: str) -> Dict[str, str]:
+    def analyze_dependencies(self) -> Dict[str, str]:
+        """Analyze project dependencies
+
+        Returns:
+            Dictionary mapping package names to versions
+        """
         # Use scan root directory
         scan_root = self._get_scan_root()
         dependencies = {}
@@ -295,14 +315,33 @@ class FileContext:
 
         return dependencies
 
-    def is_text_file(self, file_path: str) -> bool:
-        """Check if a file is a text file"""
+    def is_binary_file(self, file_path: str) -> bool:
+        """Check if a file is a binary file
+
+        Args:
+            file_path: Path to the file
+
+        Returns:
+            True if the file is binary, False otherwise
+        """
         try:
             with open(file_path, "rb") as f:
                 chunk = f.read(1024)
-                return not bool(b"\x00" in chunk)  # Simple binary detection
-        except Exception:
+                return b"\0" in chunk or b"\x00" in chunk
+        except Exception as e:
+            logger.error(f"Error checking if file is binary: {e}")
             return False
+
+    def is_text_file(self, file_path: str) -> bool:
+        """Check if a file is a text file
+
+        Args:
+            file_path: Path to the file
+
+        Returns:
+            True if the file is text, False otherwise
+        """
+        return not self.is_binary_file(file_path)
 
     def is_file_in_scan_root(self, file_path: str, scan_root: str) -> bool:
         """Check if file is within scan root"""
@@ -319,4 +358,9 @@ class FileContext:
 
     def _get_error_response(self, error_msg: str) -> Dict:
         """Uniform error response format"""
-        return {"content": "", "imports": [], "related_files": [], "error": error_msg}
+        from ..providers.base import create_error_response
+
+        # 创建文件上下文特定的错误响应
+        response = {"content": "", "imports": [], "related_files": []}
+        response["error"] = error_msg
+        return create_error_response(error_msg, include_metadata=True)

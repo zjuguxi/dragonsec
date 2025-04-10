@@ -25,6 +25,10 @@ class GeminiProvider(AIProvider):
 
     def __init__(self, api_key: str, max_retries: int = 2):
         super().__init__(api_key)
+        
+        # 初始化 Google Generative AI
+        genai.configure(api_key=api_key)
+        
         self.model = "gemini-pro"
         self.client = genai.GenerativeModel(self.model)
         self.context_cache = {}
@@ -187,23 +191,10 @@ class GeminiProvider(AIProvider):
 
     def _filter_relevant_deps(self, deps: Dict[str, str]) -> Dict[str, str]:
         """filter out security related dependencies"""
-        security_related = {
-            "crypto",
-            "security",
-            "auth",
-            "jwt",
-            "bcrypt",
-            "hash",
-            "password",
-            "ssl",
-            "tls",
-            "https",
-            "oauth",
-        }
         return {
             k: v
             for k, v in deps.items()
-            if any(term in k.lower() for term in security_related)
+            if any(term in k.lower() for term in self.SECURITY_TERMS)
         }
 
     def _simplify_structure(self, structure: Dict) -> Dict:
@@ -237,50 +228,20 @@ class GeminiProvider(AIProvider):
         self, imports: List[str], max_imports: int = 5
     ) -> List[str]:
         """filter out the most relevant imports"""
-        security_related = {
-            "crypto",
-            "security",
-            "auth",
-            "jwt",
-            "bcrypt",
-            "hash",
-            "password",
-            "ssl",
-            "tls",
-            "https",
-        }
-
         relevant = [
             imp
             for imp in imports
-            if any(term in imp.lower() for term in security_related)
+            if any(term in imp.lower() for term in self.SECURITY_TERMS)
         ]
         return relevant[:max_imports]
 
-    def _get_default_response(self) -> Dict:
-        """Return default response"""
-        return {
-            "vulnerabilities": [],
-            "overall_score": 0,
-            "summary": "Failed to analyze code",
-        }
+    # 使用基类的 _get_default_response 方法
 
     def _find_project_root(self, file_path: str) -> Optional[str]:
         """find the project root directory"""
-        current = Path(file_path).parent
-        root_indicators = {
-            ".git",
-            "package.json",
-            "setup.py",
-            "pom.xml",
-            "build.gradle",
-        }
-
-        while current != current.parent:
-            if any((current / indicator).exists() for indicator in root_indicators):
-                return str(current)
-            current = current.parent
-        return None
+        from ..utils.file_utils import FileContext
+        context = FileContext()
+        return context.find_project_root(file_path)
 
     def _get_relative_project_path(self, file_path: str) -> str:
         """get the relative path from the project root"""

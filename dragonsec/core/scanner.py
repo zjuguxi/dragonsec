@@ -128,8 +128,6 @@ class SecurityScanner:
         if mode != ScanMode.SEMGREP_ONLY:
             if mode == ScanMode.LOCAL:
                 # For local mode, pass local_url and local_model
-                from ..providers.local import LocalProvider
-
                 self.ai_provider = LocalProvider(
                     api_key=api_key,
                     base_url=local_url or "http://localhost:11434",
@@ -183,11 +181,6 @@ class SecurityScanner:
 
     def _create_provider(self, mode: ScanMode, api_key: str) -> AIProvider:
         """创建对应的 AI 提供商实例"""
-        from ..providers.openai import OpenAIProvider
-        from ..providers.gemini import GeminiProvider
-        from ..providers.deepseek import DeepseekProvider
-        from ..providers.grok import GrokProvider
-        from ..providers.local import LocalProvider  # 导入 LocalProvider
 
         providers = {
             ScanMode.OPENAI: OpenAIProvider,
@@ -498,19 +491,8 @@ class SecurityScanner:
             if progress_bar:
                 progress_bar.update(1)
 
-            return {
-                "vulnerabilities": [],
-                "overall_score": 0,
-                "summary": f"Error scanning file: {str(e)}",
-                "metadata": {
-                    "files_scanned": 0,
-                    "skipped_files": 0,
-                    "scan_duration": 0,
-                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                    "mode": self.mode.value,
-                    "error": str(e),
-                },
-            }
+            from ..providers.base import create_error_response
+            return create_error_response(f"Error scanning file: {str(e)}", score=0, include_metadata=True)
 
     async def process_batch(self, batch: List[str], progress_bar=None) -> List[Dict]:
         """Process a batch of files"""
@@ -837,19 +819,8 @@ class SecurityScanner:
 
             logger.error(traceback.format_exc())
 
-            return {
-                "vulnerabilities": [],
-                "overall_score": 100,
-                "summary": "Error during scan",
-                "metadata": {
-                    "files_scanned": 0,
-                    "skipped_files": 0,
-                    "scan_duration": 0,
-                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                    "mode": mode,
-                    "error": f"Error during scan: {str(e)}",
-                },
-            }
+            from ..providers.base import create_error_response
+            return create_error_response(f"Error during scan: {str(e)}", score=100, include_metadata=True)
 
     def _calculate_security_score(self, vulnerabilities: List[Dict]) -> int:
         """Calculate security score based on vulnerabilities"""
@@ -878,21 +849,11 @@ class SecurityScanner:
 
         return int(score)
 
-    def _get_error_result(self) -> Dict:
+    def _get_error_result(self, error_msg: str = "Error during scan") -> Dict:
         """Get error result"""
-        return {
-            "vulnerabilities": [],
-            "overall_score": 100,
-            "summary": "No files to scan",
-            "metadata": {
-                "files_scanned": 0,
-                "skipped_files": 0,
-                "scan_duration": 0,
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "mode": self.mode.value,
-                "error": "Error during scan",
-            },
-        }
+        from ..providers.base import create_error_response
+
+        return create_error_response(error_msg, score=100, include_metadata=True)
 
     def _summarize_results(self, results: List[Dict]) -> Dict:
         """Summarize scan results"""
