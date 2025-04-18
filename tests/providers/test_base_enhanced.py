@@ -6,8 +6,8 @@ from typing import Dict, List
 import asyncio
 
 
-# 创建一个具体的AIProvider子类用于测试
-class TestProvider(AIProvider):
+# 重命名 TestProvider 以避免 pytest 警告
+class _TestProvider(AIProvider):
     """Concrete implementation of AIProvider for testing"""
     
     def __init__(self, api_key: str):
@@ -62,7 +62,7 @@ def test_create_error_response():
 @pytest.mark.asyncio
 async def test_handle_api_errors_decorator():
     """Test handle_api_errors decorator"""
-    provider = TestProvider("test-key")
+    provider = _TestProvider("test-key")
     
     # Test successful execution
     result = await provider.test_api_method()
@@ -77,29 +77,29 @@ async def test_handle_api_errors_decorator():
 
 def test_secure_api_key():
     """Test _secure_api_key method"""
-    provider = TestProvider("valid-key")
+    provider = _TestProvider("valid-key")
     assert provider.api_key == "valid-key"
     
     # Test with whitespace
-    provider = TestProvider("  spaced-key  ")
+    provider = _TestProvider("  spaced-key  ")
     assert provider.api_key == "spaced-key"
     
     # Test with empty key
-    provider = TestProvider("")
+    provider = _TestProvider("")
     assert provider.api_key == ""
     
     # Test with None key
-    provider = TestProvider(None)
+    provider = _TestProvider(None)
     assert provider.api_key == ""
     
     # Test with very short key
-    provider = TestProvider("ab")
+    provider = _TestProvider("ab")
     assert provider.api_key == "ab"
 
 
 def test_system_prompt():
     """Test system_prompt property"""
-    provider = TestProvider("test-key")
+    provider = _TestProvider("test-key")
     prompt = provider.system_prompt
     
     # Verify the prompt contains key security principles
@@ -110,7 +110,7 @@ def test_system_prompt():
 
 def test_standardize_vulnerability():
     """Test _standardize_vulnerability method"""
-    provider = TestProvider("test-key")
+    provider = _TestProvider("test-key")
     
     # Test valid vulnerability
     vuln = {
@@ -167,7 +167,7 @@ def test_standardize_vulnerability():
 
 def test_calculate_security_score():
     """Test _calculate_security_score method"""
-    provider = TestProvider("test-key")
+    provider = _TestProvider("test-key")
     
     # Test with no vulnerabilities
     score = provider._calculate_security_score([])
@@ -196,7 +196,7 @@ def test_calculate_security_score():
 
 def test_is_test_file():
     """Test _is_test_file method"""
-    provider = TestProvider("test-key")
+    provider = _TestProvider("test-key")
     
     # Test various test file paths
     assert provider._is_test_file("/path/to/tests/test_file.py") is True
@@ -218,7 +218,7 @@ def test_is_test_file():
 @pytest.mark.asyncio
 async def test_analyze_code():
     """Test analyze_code method"""
-    provider = TestProvider("test-key")
+    provider = _TestProvider("test-key")
     
     # Test valid code analysis
     result = await provider.analyze_code("def test(): pass", "file.py")
@@ -246,7 +246,7 @@ async def test_analyze_code():
 @pytest.mark.asyncio
 async def test_deduplicate_vulnerabilities():
     """Test deduplicate_vulnerabilities method"""
-    provider = TestProvider("test-key")
+    provider = _TestProvider("test-key")
     
     # Test with empty list
     result = await provider.deduplicate_vulnerabilities([])
@@ -281,7 +281,7 @@ async def test_deduplicate_vulnerabilities():
 
 def test_prepare_prompt():
     """Test _prepare_prompt method"""
-    provider = TestProvider("test-key")
+    provider = _TestProvider("test-key")
     
     # Test without context
     prompt = provider._prepare_prompt("print('test')")
@@ -297,7 +297,7 @@ def test_prepare_prompt():
 
 def test_get_decision_prompt():
     """Test _get_decision_prompt method"""
-    provider = TestProvider("test-key")
+    provider = _TestProvider("test-key")
     prompt = provider._get_decision_prompt()
     
     # Verify the prompt contains the decision tree
@@ -308,7 +308,7 @@ def test_get_decision_prompt():
 
 def test_get_context_categories():
     """Test _get_context_categories method"""
-    provider = TestProvider("test-key")
+    provider = _TestProvider("test-key")
     categories = provider._get_context_categories()
     
     # Verify the categories are present

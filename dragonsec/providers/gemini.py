@@ -81,7 +81,7 @@ class GeminiProvider(AIProvider):
 
                 try:
                     result = json.loads(text)
-                    return self._parse_response(result)
+                    return await self._parse_response(result, file_path)
                 except json.JSONDecodeError:
                     print(f"Invalid JSON response: {text[:100]}...")
                     raise

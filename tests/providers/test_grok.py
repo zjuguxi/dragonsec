@@ -9,16 +9,21 @@ def grok_provider():
     with patch("dragonsec.providers.base.AIProvider._secure_api_key") as mock_secure:
         mock_secure.return_value = "xai-test-key"
         provider = GrokProvider("xai-test-key")
-        assert provider.model == "grok-2-latest"
-        assert "api.x.ai" in str(provider.client.base_url)
         return provider
 
 
-@pytest.mark.asyncio
-async def test_grok_analysis_with_findings():
-    """Test Grok code analysis with security findings"""
-    provider = GrokProvider("xai-test-key")
+def test_grok_init():
+    """Test GrokProvider initialization parameters"""
+    with patch("dragonsec.providers.base.AIProvider._secure_api_key") as mock_secure:
+        mock_secure.return_value = "xai-test-key"
+        provider = GrokProvider("xai-test-key")
+        assert provider.model == "grok-2-latest"
+        assert "api.x.ai" in str(provider.client.base_url)
 
+
+@pytest.mark.asyncio
+async def test_grok_analysis_with_findings(grok_provider):
+    """Test Grok code analysis with security findings"""
     mock_response = AsyncMock()
     mock_response.choices = [AsyncMock()]
     mock_response.choices[0].message = AsyncMock()
@@ -46,9 +51,9 @@ async def test_grok_analysis_with_findings():
         "openai.resources.chat.completions.AsyncCompletions.create",
         return_value=mock_response,
     ):
-        with patch.object(provider.client, "chat") as mock_chat:
+        with patch.object(grok_provider.client, "chat") as mock_chat:
             mock_chat.completions.create = AsyncMock(return_value=mock_response)
-            result = await provider._analyze_with_ai(
+            result = await grok_provider._analyze_with_ai(
                 code="query = f'SELECT * FROM users WHERE id = {user_input}'",
                 file_path="test.py",
             )
@@ -59,10 +64,8 @@ async def test_grok_analysis_with_findings():
 
 
 @pytest.mark.asyncio
-async def test_grok_analysis_no_findings():
+async def test_grok_analysis_no_findings(grok_provider):
     """Test Grok code analysis with no findings"""
-    provider = GrokProvider("xai-test-key")
-
     mock_response = AsyncMock()
     mock_response.choices = [AsyncMock()]
     mock_response.choices[0].message = AsyncMock()
@@ -80,7 +83,7 @@ async def test_grok_analysis_no_findings():
         "openai.resources.chat.completions.AsyncCompletions.create",
         new=AsyncMock(return_value=mock_response),
     ):
-        result = await provider.analyze_code(
+        result = await grok_provider.analyze_code(
             code="print('Hello, World!')", file_path="test.py"
         )
 
@@ -90,27 +93,23 @@ async def test_grok_analysis_no_findings():
 
 
 @pytest.mark.asyncio
-async def test_grok_analysis_error():
+async def test_grok_analysis_error(grok_provider):
     """Test Grok code analysis error handling"""
-    provider = GrokProvider("xai-test-key")
-
     with patch(
         "openai.resources.chat.completions.AsyncCompletions.create",
         side_effect=Exception("API Error"),
     ):
-        result = await provider.analyze_code(code="test code", file_path="test.py")
+        result = await grok_provider.analyze_code(code="test code", file_path="test.py")
 
-        assert result == provider._get_default_response()
+        assert result == grok_provider._get_default_response()
         assert len(result["vulnerabilities"]) == 0
         assert result["overall_score"] == 100
 
 
 @pytest.mark.asyncio
-async def test_grok_skip_test_files():
+async def test_grok_skip_test_files(grok_provider):
     """Test that test files are skipped"""
-    provider = GrokProvider("xai-test-key")
-
-    result = await provider.analyze_code(
+    result = await grok_provider.analyze_code(
         code="test code", file_path="/path/to/tests/test_file.py"
     )
 
