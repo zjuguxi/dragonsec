@@ -17,7 +17,7 @@ def test_grok_init():
     with patch("dragonsec.providers.base.AIProvider._secure_api_key") as mock_secure:
         mock_secure.return_value = "xai-test-key"
         provider = GrokProvider("xai-test-key")
-        assert provider.model == "grok-2-latest"
+        assert provider.model == "grok-3-latest"
         assert "api.x.ai" in str(provider.client.base_url)
 
 
