@@ -30,6 +30,9 @@ dependencies = [
     "tenacity",
 ]
 
+[project.scripts]
+dragonsec = "dragonsec.__main__:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest",

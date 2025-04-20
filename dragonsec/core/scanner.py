@@ -615,7 +615,8 @@ class SecurityScanner:
 
             if not files_to_scan:
                 logger.warning(f"No files to scan in {path}")
-                return {
+                # Construct the result dictionary first
+                no_files_result = {
                     "vulnerabilities": [],
                     "overall_score": 100,
                     "summary": "No files to scan",
@@ -625,9 +626,20 @@ class SecurityScanner:
                         "skipped_reasons": skipped_reasons,
                         "scan_duration": 0,
                         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                        "mode": mode,
+                        # Use self.mode.value here for consistency
+                        "mode": self.mode.value,
                     },
                 }
+                # Attempt to save the "no files" result
+                output_file = None
+                if self.output_dir:
+                    # Use the directory path for saving the summary when no files are scanned
+                    output_file = self._save_scan_results(no_files_result, str(path))
+                # Add output file path to metadata if saved
+                if output_file:
+                    no_files_result["metadata"]["output_file"] = output_file
+
+                return no_files_result
 
             if self.verbose:
                 logger.info(
