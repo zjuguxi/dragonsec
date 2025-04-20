@@ -28,7 +28,7 @@ class GrokProvider(AIProvider):
         }
         
         self.client = AsyncOpenAI(**client_config)
-        self.model = "grok-2-latest"
+        self.model = "grok-3-latest"
 
     @property
     def system_prompt(self) -> str:
