@@ -13,7 +13,7 @@ DragonSec is an advanced security scanner that combines traditional static analy
 
 ![image](https://github.com/user-attachments/assets/1768ed57-fd6a-4728-b63f-265484af5563)
 
-[Website](https://dragonsec.netlify.app/#features)
+[Website](https://dragonsec.netlify.app/)
 
 [中文文档](./README_zh.md)
 
