@@ -5,6 +5,7 @@
 [![codecov](https://codecov.io/gh/zjuguxi/dragonsec/branch/main/graph/badge.svg)](https://codecov.io/gh/zjuguxi/dragonsec)
 ![Python Version](https://img.shields.io/badge/python-3.9%2B-blue)
 ![License](https://img.shields.io/badge/license-Apache%202-green)
+[![Netlify Status](https://api.netlify.com/api/v1/badges/3068a221-85df-4ac2-ab87-db4e9d16596a/deploy-status)](https://app.netlify.com/projects/dragonsec-sast/deploys)
 
 <!-- END BADGIE TIME -->
 
@@ -13,7 +14,7 @@ DragonSec is an advanced security scanner that combines traditional static analy
 
 ![image](https://github.com/user-attachments/assets/1768ed57-fd6a-4728-b63f-265484af5563)
 
-[Website](https://dragonsec.netlify.app/)
+[Website](https://dragonsec-sast.netlify.app/)
 
 [中文文档](./README_zh.md)
 
