@@ -42,8 +42,11 @@ DragonSec is an advanced security scanner that combines traditional static analy
 ## Installation
 
 ```bash
-pip install dragonsec
+git clone https://github.com/zjuguxi/dragonsec
+cd dragonsec
+pip install -e .
 ```
+
 ## Quick Start
 
 1. Set up your API keys:
